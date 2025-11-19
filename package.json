@@ -1,0 +1,13 @@
+{
+    "name": "qoe-suite-server",
+    "version": "1.0.0",
+    "description": "Optional backend to accept QoE results",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.18.2"
+    }
+  }
+  

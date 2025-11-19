@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Network QoE Tester</title>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- jsPDF for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- YouTube iframe API (old logic uses this global callback) -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="page-wrapper">
+
+    <header class="app-header">
+      <div class="header-row">
+        <img src="assets/image.png" alt="App Logo" class="logo" />
+        <h1>Network Pulse Test Suite</h1>
+      </div>
+      <p class="subtitle">Real-time QoE & performance insights.</p>
+    </header>
+    
+
+    <section class="controls-card">
+      <div class="left">
+        <label>VoIP Duration (sec)
+          <input id="voipDuration" type="number" min="5" max="300" value="30">
+        </label>
+        <label>Video Duration (sec)
+          <input id="videoDuration" type="number" min="5" max="120" value="30">
+        </label>
+        <label>YouTube Duration (sec)
+          <input id="ytDuration" type="number" min="5" max="120" value="30">
+        </label>
+        <label>Speed Test(sec)
+          <input id="speedDuration" type="number" min="5" max="120" value="30">
+        </label>
+      </div>
+
+      <div class="button-area" id="buttonArea">
+        <!-- <button id="runVoipBtn" class="btn primary">Run VoIP</button> -->
+        <!-- <button id="runLocalBtn" class="btn">Run Local Video</button> -->
+        <!-- <button id="runYtBtn" class="btn">Run YouTube</button> -->
+        <button id="runAllBtn" class="btn accent">Run All (Email Required)</button>
+        <!-- <button id="runSpeedBtn" class="btn">Run Speed Test</button> -->
+        <button id="exportCSV" class="btn outline">Export CSV</button>
+        <button id="exportPDF" class="btn outline">Export PDF</button>
+        <button id="exportJSON" class="btn outline">Export JSON</button>
+      </div>
+
+      <div class="right">
+        <div class="timer-box">Timer: <span id="timer">0s</span></div>
+        <div class="status-box">Status: <span id="status">Idle</span></div>
+      </div>
+    </section>
+
+    <section class="results-grid">
+
+      <div class="card" id="voipCard">
+        <h3>VoIP Test</h3>
+        <div class="card-body">
+          <canvas id="latencyChart" height="140"></canvas>
+          <div id="voipResults" class="results"></div>
+        </div>
+      </div>
+
+      <div class="card" id="localCard">
+        <h3>Local Video Test</h3>
+        <div class="card-body">
+          <video id="localVideo" src="assets/test-video.mp4" playsinline preload="auto" style="display:none"></video>
+          <div id="localResults" class="results"></div>
+        </div>
+      </div>
+
+      <div class="card" id="ytCard">
+        <h3>YouTube Test</h3>
+        <div class="card-body">
+          <div id="youtubeContainer" style="display:none">
+            <div id="youtubePlayer"></div>
+          </div>
+          <div id="ytResults" class="results"></div>
+        </div>
+      </div>
+
+      <div class="card" id="speedCard">
+        <h3>Speed Test (LibreSpeed)</h3>
+        <div class="card-body">
+          <div id="speedControl" class="small">LibreSpeed client will be used (auto-run). If unavailable, a simulated test is run.</div>
+          <div id="speedResults" class="results"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <section class="history-card">
+      <h3>History</h3>
+      <div id="historyList"></div>
+      <button id="clearHistory" class="btn outline">Clear History</button>
+    </section>
+
+    <!-- Hidden audio to enable inbound stats and autoplay behavior -->
+    <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
+
+  </div>
+
+  <!-- Email modal -->
+  <div id="emailModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal" role="document">
+      <h4>Enter your email so we can save or send the test report (e.g. you@example.com):</h4>
+      <div class="small">This email will be attached to the test run in History. Please wait for 120 seconds for the whole test to be run properly</div>
+      <div class="modal-row">
+        <input id="emailInput" type="email" placeholder="you@example.com" />
+      </div>
+      <div class="modal-actions">
+        <button id="emailCancelBtn" class="btn outline">Cancel</button>
+        <button id="emailStartBtn" class="btn primary">Start Tests</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
