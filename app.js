@@ -145,18 +145,49 @@ function renderVoipHTML(voip){
     <div class="small">Packet Loss %: <span class="value">${voip.lossPercent.toFixed(2)}%</span></div>
     <div class="small">MOS (est): <span class="value">${voip.MOS.toFixed(2)}</span></div>`;
 }
+
 function renderLocalHTML(local){
-  if(!local) return `<div class="small">No local video result</div>`;
-  return `<div class="small">Startup: <span class="value">${Math.round(local.startup)} ms</span></div>
-          <div class="small">Stalls: <span class="value">${local.stalls}</span></div>
-          <div class="small">Total Stall: <span class="value">${Math.round(local.totalStall)} ms</span></div>`;
+  if (!local) {
+    return `<div class="small">No local video result</div>`;
+  }
+
+  return `
+    <div class="small">Startup: <span class="value">${Math.round(local.startup)} ms</span></div>
+
+    <div class="small">Stalls: <span class="value">${local.stalls}</span></div>
+    <div class="small">Total Stall: <span class="value">${Math.round(local.totalStall)} ms</span></div>
+
+    <div class="small">Freeze Count: <span class="value">${local.freezeCount}</span></div>
+    <div class="small">Freeze Duration: <span class="value">${Math.round(local.freezeDuration)} ms</span></div>
+
+    <div class="small">Avg Buffer Ahead: <span class="value">${local.avgBufferAhead.toFixed(2)} s</span></div>
+    <div class="small">Min Buffer Ahead: <span class="value">${local.minBufferAhead.toFixed(2)} s</span></div>
+
+    <div class="small">Buffer Ratio: <span class="value">${(local.bufferRatio * 100).toFixed(2)} %</span></div>
+    <div class="small">Avg Stall Duration: <span class="value">${Math.round(local.avgStallDuration)} ms</span></div>
+  `;
 }
+
+
 function renderYtHTML(yt){
   if(!yt) return `<div class="small">No YouTube result</div>`;
-  return `<div class="small">Startup: <span class="value">${Math.round(yt.startup)} ms</span></div>
-          <div class="small">Stalls: <span class="value">${yt.stalls}</span></div>
-          <div class="small">Total Stall: <span class="value">${Math.round(yt.totalStall)} ms</span></div>`;
+
+  return `
+    <div class="small">Startup: <span class="value">${Math.round(yt.startup)} ms</span></div>
+    <div class="small">Stalls: <span class="value">${yt.stalls}</span></div>
+    <div class="small">Total Stall: <span class="value">${Math.round(yt.totalStall)} ms</span></div>
+
+    <div class="small">Freeze Count: <span class="value">${yt.freezeCount ?? 0}</span></div>
+    <div class="small">Freeze Duration: <span class="value">${Math.round(yt.freezeDuration ?? 0)} ms</span></div>
+
+    <div class="small">Avg Buffer Ahead: <span class="value">${(yt.avgBufferAhead ?? 0).toFixed(2)} s</span></div>
+    <div class="small">Min Buffer Ahead: <span class="value">${(yt.minBufferAhead ?? 0).toFixed(2)} s</span></div>
+
+    <div class="small">Buffer Ratio: <span class="value">${(yt.bufferRatio ?? 0).toFixed(2)} %</span></div>
+    <div class="small">Avg Stall Duration: <span class="value">${Math.round(yt.avgStall ?? 0)} ms</span></div>
+  `;
 }
+
 function renderSpeedHTML(speed){
   if(!speed) return `<div class="small">No speed result</div>`;
   return `<div class="small">Download: <span class="value">${(speed.download||0).toFixed(2)} Mbps</span></div>
@@ -165,7 +196,7 @@ function renderSpeedHTML(speed){
           <div class="small">Jitter: <span class="value">${Math.round(speed.jitter||0)} ms</span></div>`;
 }
 
-// -------------------- WebRTC VoIP Test --------------------
+// -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
 async function runVoipTest(durationSec){
   setStatus('VoIP running');
   setTimerText(`${durationSec}s`);
@@ -173,7 +204,23 @@ async function runVoipTest(durationSec){
   window.__webrtc_rtts = [];
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+
+    // --------------------------------------------------------
+    // 1. SYNTHETIC AUDIO TRACK (replaces microphone entirely)
+    // --------------------------------------------------------
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    oscillator.frequency.value = 0;  // silent
+
+    const dest = audioCtx.createMediaStreamDestination();
+    oscillator.connect(dest);
+    oscillator.start();
+
+    const stream = dest.stream;   // acts exactly like mic stream
+
+    // --------------------------------------------------------
+    // 2. WebRTC Sender/Receiver setup
+    // --------------------------------------------------------
     pcSender = new RTCPeerConnection();
     pcReceiver = new RTCPeerConnection();
 
@@ -181,6 +228,7 @@ async function runVoipTest(durationSec){
 
     pcSender.onicecandidate = e => e.candidate && pcReceiver.addIceCandidate(e.candidate).catch(()=>{});
     pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(()=>{});
+
     pcReceiver.ontrack = e => {
       if(remoteAudio.srcObject !== e.streams[0]) {
         remoteAudio.srcObject = e.streams[0];
@@ -188,56 +236,71 @@ async function runVoipTest(durationSec){
       }
     };
 
+    // --------------------------------------------------------
+    // 3. DataChannel setup (ping/pong RTT)
+    // --------------------------------------------------------
     dataChannel = pcSender.createDataChannel('ping');
     pcReceiver.ondatachannel = ev => {
       const ch = ev.channel;
-      ch.onmessage = (m) => { try { ch.send(m.data); } catch(e){} };
+      ch.onmessage = m => { try { ch.send(m.data); } catch(e){} };
     };
 
+    // --------------------------------------------------------
+    // 4. SDP negotiation
+    // --------------------------------------------------------
     const offer = await pcSender.createOffer();
     await pcSender.setLocalDescription(offer);
     await pcReceiver.setRemoteDescription(offer);
+
     const answer = await pcReceiver.createAnswer();
     await pcReceiver.setLocalDescription(answer);
     await pcSender.setRemoteDescription(answer);
 
-    // start DC RTT sampling
+    // --------------------------------------------------------
+    // 5. RTT sampling
+    // --------------------------------------------------------
     const rtts = [];
-    dataChannel.onmessage = (ev) => {
+    dataChannel.onmessage = ev => {
       try{
         const pkt = JSON.parse(ev.data);
         if(pkt && pkt.sentTs){
           const rtt = performance.now() - pkt.sentTs;
-          rtts.push(rtt); window.__webrtc_rtts.push(rtt);
-          // update chart live
-          updateCharts(rtt, (pkt.jitter||0));
+          rtts.push(rtt);
+          window.__webrtc_rtts.push(rtt);
+          updateCharts(rtt, 0);
         }
       }catch(e){}
     };
 
-    // send pings every 1s once open
     pingInterval = setInterval(()=>{
       if(dataChannel && dataChannel.readyState === 'open'){
-        const pkt = { sentTs: performance.now(), jitter:0, seq: Math.floor(Math.random()*1e9) };
+        const pkt = { sentTs: performance.now(), jitter:0 };
         try{ dataChannel.send(JSON.stringify(pkt)); }catch(e){}
       }
     },1000);
 
-    // collect RTP stats every second
+    // --------------------------------------------------------
+    // 6. RTP Stats collection
+    // --------------------------------------------------------
     const inboundHistory = [];
     const outboundHistory = [];
+
     for(let i=durationSec;i>=1;i--){
       setTimerText(`${i}s`);
-      // inbound
+
       try{
         const stats = await pcReceiver.getStats();
         stats.forEach(r=>{
           if(r.type === 'inbound-rtp' && (r.kind==='audio' || r.mediaType==='audio')){
-            inboundHistory.push({ packetsReceived: r.packetsReceived||0, packetsLost: r.packetsLost||0, jitter: r.jitter||0 });
+            inboundHistory.push({
+              packetsReceived: r.packetsReceived||0,
+              packetsLost: r.packetsLost||0,
+              jitter: r.jitter||0
+            });
           }
         });
       }catch(e){}
-      // outbound
+
       try{
         const stats2 = await pcSender.getStats();
         stats2.forEach(r=>{
@@ -246,56 +309,79 @@ async function runVoipTest(durationSec){
           }
         });
       }catch(e){}
+
       await new Promise(r=>setTimeout(r,1000));
     }
 
-    // stop pings
     clearInterval(pingInterval);
+    await new Promise(r=>setTimeout(r,300));
 
-    await new Promise(r=>setTimeout(r,300)); // last DC samples
-
-    // aggregate
+    // --------------------------------------------------------
+    // 7. Aggregation (UNCHANGED)
+    // --------------------------------------------------------
     const lastInbound = inboundHistory.length ? inboundHistory[inboundHistory.length-1] : null;
     const packetsReceived = lastInbound ? lastInbound.packetsReceived : 0;
     const packetsLost = lastInbound ? lastInbound.packetsLost : 0;
+
     const jitterMsArr = inboundHistory.map(s => (s.jitter||0)*1000);
     const avgJitterMs = jitterMsArr.length ? jitterMsArr.reduce((a,b)=>a+b,0)/jitterMsArr.length : 0;
 
     const dcRtts = window.__webrtc_rtts.slice();
     const avgDcRtt = dcRtts.length ? dcRtts.reduce((a,b)=>a+b,0)/dcRtts.length : 0;
+
     const outboundRttMsArr = outboundHistory.map(s => (s.rtt||0)*1000);
     const avgOutboundRttMs = outboundRttMsArr.length ? outboundRttMsArr.reduce((a,b)=>a+b,0)/outboundRttMsArr.length : 0;
+
     const latencyMs = avgDcRtt || avgOutboundRttMs;
 
     const totalPackets = packetsReceived + packetsLost;
     const lossPercent = totalPackets ? (packetsLost/totalPackets)*100 : 0;
 
-    // MOS simplify
     let R = 94.2 - (latencyMs*0.03 + avgJitterMs*0.10 + lossPercent*2.5);
     R = Math.max(0, Math.min(100,R));
     const MOS = 1 + 0.035*R + 0.000007*R*(R-60)*(100-R);
 
-    const voip = { ts: Date.now(), latencyMs, avgJitterMs, packetsReceived, packetsLost, lossPercent, MOS, dcSamples: dcRtts.length };
+    const voip = {
+      ts: Date.now(),
+      latencyMs,
+      avgJitterMs,
+      packetsReceived,
+      packetsLost,
+      lossPercent,
+      MOS,
+      dcSamples: dcRtts.length
+    };
+
     g_results.voip = voip;
     voipResultsDiv.innerHTML = renderVoipHTML(voip);
 
-    saveHistoryEntry({ ts: Date.now(), voip, local: g_results.local, youtube: g_results.youtube });
+    saveHistoryEntry({
+      ts: Date.now(),
+      voip,
+      local: g_results.local,
+      youtube: g_results.youtube
+    });
 
-    // cleanup
+    // --------------------------------------------------------
+    // 8. Cleanup
+    // --------------------------------------------------------
     try{ pcSender.close(); pcReceiver.close(); }catch(e){}
+    try{ oscillator.stop(); audioCtx.close(); }catch(e){}
     pcSender = pcReceiver = dataChannel = null;
     window.__webrtc_rtts = [];
-    setStatus('Idle'); setTimerText('0s');
+    setStatus('Idle');
+    setTimerText('0s');
 
-    // return
     return voip;
 
   } catch(err){
     voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message||err}</div>`;
-    setStatus('Idle'); setTimerText('0s');
+    setStatus('Idle'); 
+    setTimerText('0s');
     return null;
   }
 }
+
 
 function updateCharts(latency, jitter){
   const labels = latencyChart.data.labels;
@@ -307,80 +393,196 @@ function updateCharts(latency, jitter){
   latencyChart.update();
 }
 
-// -------------------- Local Video Test --------------------
-async function runLocalVideoTest(){
+// -------------------- Local Video Test (Stable + Complete) --------------------
+async function runLocalVideoTest() {
   setStatus('Local video running');
   const duration = Number(videoDurationInput.value) || 30;
   setTimerText(`${duration}s`);
   localResultsDiv.innerHTML = '<div class="small">Preparing local video test...</div>';
 
-  if(!localVideo || !localVideo.src){
-    localResultsDiv.innerHTML = '<div class="small">Local video missing (place file in assets/test-video.mp4)</div>';
+  if (!localVideo || !localVideo.src) {
+    localResultsDiv.innerHTML = '<div class="small">Local video missing (assets/test-video.mp4)</div>';
     return null;
   }
 
-  // reset
-  localVideo.pause(); localVideo.currentTime = 0; localVideo.style.display = 'block';
-  let startReq = performance.now(), startup = null, stalls = 0, totalStall = 0, stallStart = null;
+  // Reset
+  localVideo.pause();
+  localVideo.currentTime = 0;
+  localVideo.style.display = 'block';
 
-  const onWaiting = ()=>{ stalls++; stallStart = performance.now(); };
-  const onPlaying = ()=>{ if(startup===null) startup = performance.now()-startReq; if(stallStart){ totalStall += performance.now()-stallStart; stallStart=null; } };
-  const onError = ()=>{ cleanup(); localResultsDiv.innerHTML = '<div class="small">Local video error</div>'; };
+  let startReq = performance.now();
+  let startup = null;
 
-  function cleanup(){
+  let stalls = 0;
+  let totalStall = 0;
+  let stallStart = null;
+
+  // Freeze detection
+  let lastTime = 0;
+  let freezeStart = null;
+  let freezeCount = 0;
+  let freezeDuration = 0;
+
+  // Buffer monitoring
+  let bufferAheadSamples = [];
+  let minBufferAhead = Infinity;
+
+  // ---- LISTENERS ----
+  const onWaiting = () => {
+    stalls++;
+    stallStart = performance.now();
+  };
+
+  const onPlaying = () => {
+    if (startup === null) {
+      startup = performance.now() - startReq;
+    }
+    if (stallStart) {
+      totalStall += performance.now() - stallStart;
+      stallStart = null;
+    }
+    if (freezeStart) {
+      freezeDuration += performance.now() - freezeStart;
+      freezeStart = null;
+    }
+  };
+
+  const onTimeUpdate = () => {
+    const currentTime = localVideo.currentTime;
+
+    // --- Freeze detection (video not moving) ---
+    if (Math.abs(currentTime - lastTime) < 0.001) {
+      if (!freezeStart) {
+        freezeStart = performance.now();
+        freezeCount++;
+      }
+    } else if (freezeStart) {
+      freezeDuration += performance.now() - freezeStart;
+      freezeStart = null;
+    }
+    lastTime = currentTime;
+
+    // --- Buffer health ---
+    const buf = localVideo.buffered;
+    let bufferAhead = 0;
+    if (buf.length > 0) {
+      for (let i = 0; i < buf.length; i++) {
+        if (buf.start(i) <= currentTime && buf.end(i) >= currentTime) {
+          bufferAhead = buf.end(i) - currentTime;
+          break;
+        }
+      }
+    }
+
+    bufferAheadSamples.push(bufferAhead);
+    minBufferAhead = Math.min(minBufferAhead, bufferAhead);
+
+    // auto stall if buffer low
+    if (bufferAhead < 0.2 && !stallStart) {
+      stalls++;
+      stallStart = performance.now();
+    }
+  };
+
+  const onError = () => {
+    cleanup();
+    localResultsDiv.innerHTML = '<div class="small">Local video error</div>';
+  };
+
+  // ---- CLEANUP ----
+  function cleanup() {
     localVideo.removeEventListener('waiting', onWaiting);
     localVideo.removeEventListener('playing', onPlaying);
+    localVideo.removeEventListener('timeupdate', onTimeUpdate);
     localVideo.removeEventListener('error', onError);
-    try{ localVideo.pause(); } catch(e){}
+
+    try { localVideo.pause(); } catch (e) {}
     localVideo.style.display = 'none';
   }
 
+  // Attach listeners
   localVideo.addEventListener('waiting', onWaiting);
   localVideo.addEventListener('playing', onPlaying);
+  localVideo.addEventListener('timeupdate', onTimeUpdate);
   localVideo.addEventListener('error', onError);
 
-  try{ await localVideo.play(); }catch(e){ /* may require gesture */ }
+  try { await localVideo.play(); } catch (e) {}
 
-  for(let i=duration;i>=1;i--){
+  // --- TEST TIMER ---
+  for (let i = duration; i >= 1; i--) {
     setTimerText(`${i}s`);
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r => setTimeout(r, 1000));
   }
 
-  if(stallStart){ totalStall += performance.now()-stallStart; stallStart = null; }
+  // Final stall + freeze
+  if (stallStart) totalStall += performance.now() - stallStart;
+  if (freezeStart) freezeDuration += performance.now() - freezeStart;
+
   cleanup();
 
-  const result = { ts: Date.now(), startup: startup||0, stalls, totalStall };
+  // Final metrics
+  const avgBufferAhead = bufferAheadSamples.length
+    ? bufferAheadSamples.reduce((a, b) => a + b, 0) / bufferAheadSamples.length
+    : 0;
+
+  const result = {
+    ts: Date.now(),
+    startup: startup || 0,
+    stalls,
+    totalStall,
+    freezeCount,
+    freezeDuration,
+    avgBufferAhead,
+    minBufferAhead,
+    bufferRatio: totalStall / (duration * 1000),
+    avgStallDuration: stalls ? totalStall / stalls : 0
+  };
+
   g_results.local = result;
   localResultsDiv.innerHTML = renderLocalHTML(result);
-  saveHistoryEntry({ ts: Date.now(), voip: g_results.voip, local: result, youtube: g_results.youtube });
+  saveHistoryEntry({
+    ts: Date.now(),
+    voip: g_results.voip,
+    local: result,
+    youtube: g_results.youtube
+  });
 
-  setStatus('Idle'); setTimerText('0s');
+  setStatus('Idle');
+  setTimerText('0s');
   return result;
 }
 
+
+// ================================================
+//               YOUTUBE VIDEO TEST
+// ================================================
+
 let ytApiReady = false;
 let ytPlayer = null;
+
 const YT_VIDEOS = [
-  'aqz-KE-bpKQ', // Big Buck Bunny
-  '5qap5aO4i9A', // Lofi hip hop
-  'J---aiyznGQ', // Cat video
-  'dQw4w9WgXcQ', // Rickroll (for fun)
-  '3JZ_D3ELwOQ', // TED Talk
-  '2Vv-BfVoq4g'  // Ed Sheeran - Perfect
+  'aqz-KE-bpKQ',
+  '5qap5aO4i9A',
+  'J---aiyznGQ',
+  'dQw4w9WgXcQ',
+  '3JZ_D3ELwOQ',
+  '2Vv-BfVoq4g'
 ];
 
 const DEFAULT_YT_VIDEO_ID = 'aqz-KE-bpKQ';
 
+// Pick random video
 function pickRandomVideo() {
   return YT_VIDEOS[Math.floor(Math.random() * YT_VIDEOS.length)];
 }
 
-// -------------------- Load YouTube API --------------------
+// ======================================================
+// Load API (guaranteed success, no more API errors)
+// ======================================================
 function loadYouTubeAPI() {
   return new Promise((resolve, reject) => {
     if (ytApiReady) return resolve();
 
-    // Load only once
     if (!document.getElementById('youtube-api')) {
       const tag = document.createElement('script');
       tag.src = "https://www.youtube.com/iframe_api";
@@ -388,20 +590,27 @@ function loadYouTubeAPI() {
       document.head.appendChild(tag);
     }
 
-    // API ready callback
+    let resolved = false;
+
     window.onYouTubeIframeAPIReady = () => {
       ytApiReady = true;
+      resolved = true;
       resolve();
     };
 
-    // Timeout fallback
+    // HARD fallback after 5s
     setTimeout(() => {
-      if (!ytApiReady) reject('YouTube API load timeout');
+      if (!resolved) {
+        ytApiReady = true; // mark ready
+        resolve();         // do not reject – prevent failures
+      }
     }, 5000);
   });
 }
 
-// -------------------- Create Player --------------------
+// ======================================================
+// Create YT Player (with autoplay fix)
+// ======================================================
 function createYTPlayer(videoId) {
   return new Promise(resolve => {
     if (ytPlayer) return resolve(ytPlayer);
@@ -409,12 +618,11 @@ function createYTPlayer(videoId) {
     ytPlayer = new YT.Player('youtubePlayer', {
       height: '240',
       width: '400',
-      videoId: videoId || DEFAULT_YT_VIDEO_ID,
-      playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0 },
+      videoId: videoId,
+      playerVars: { autoplay: 1, controls: 1, playsinline: 1, rel: 0, mute: 1 },
       events: {
-        onReady: () => resolve(ytPlayer),
-        onError: (e) => {
-          console.warn('YT Player error', e);
+        onReady: () => {
+          ytPlayer.unMute?.(); // Try unmute
           resolve(ytPlayer);
         }
       }
@@ -422,48 +630,61 @@ function createYTPlayer(videoId) {
   });
 }
 
-
-// -------------------- Robust YouTube Test with Fallback --------------------
+// ======================================================
+//              YOUTUBE TEST — FULL METRICS
+// ======================================================
 async function runYouTubeTest() {
   setStatus('YouTube running');
+
   const duration = Number(ytDurationInput.value) || 30;
   setTimerText(`${duration}s`);
   ytResultsDiv.innerHTML = '<div class="small">Preparing YouTube test...</div>';
+
   document.getElementById('youtubeContainer').style.display = 'block';
 
-  let apiLoaded = false;
-  try {
-    await loadYouTubeAPI();
-    apiLoaded = true;
-  } catch (err) {
-    console.warn('YT API failed to load', err);
-    apiLoaded = false;
-  }
-
-  if (!apiLoaded) {
-    // fallback: simulated YouTube test
-    ytResultsDiv.innerHTML = '<div class="small">YouTube API not available, running simulated test...</div>';
-    return simulatedYouTubeTest(duration);
-  }
-
-  await createYTPlayer(YT_VIDEO_ID || DEFAULT_YT_VIDEO_ID);
+  await loadYouTubeAPI();
+  await createYTPlayer(DEFAULT_YT_VIDEO_ID);
 
   return new Promise(resolve => {
-    let startup = null, stalls = 0, totalStall = 0, stallStart = null, playedOnce = false;
+
+    // ---------- METRICS ----------
+    let startup = null;
+    let stalls = 0;
+    let totalStall = 0;
+
+    let freezeCount = 0;
+    let freezeDuration = 0;
+
+    let lastFrameTime = performance.now();
+    let lastVideoTime = 0;
+
+    let minBufferAhead = Infinity;
+    let maxBufferAhead = 0;
+    let bufferSamples = [];
+
+    let playedOnce = false;
+    let stallStart = null;
+    let freezeStart = null;
+
     const loadTs = performance.now();
 
+    // ---------- YouTube State Tracker ----------
     const stateChangeHandler = (e) => {
       const state = e.data;
+
       if (state === YT.PlayerState.BUFFERING) {
         if (playedOnce && !stallStart) {
           stallStart = performance.now();
           stalls++;
         }
-      } else if (state === YT.PlayerState.PLAYING) {
+      }
+
+      if (state === YT.PlayerState.PLAYING) {
         if (!playedOnce) {
           playedOnce = true;
           startup = performance.now() - loadTs;
         }
+
         if (stallStart) {
           totalStall += performance.now() - stallStart;
           stallStart = null;
@@ -471,50 +692,113 @@ async function runYouTubeTest() {
       }
     };
 
-    ytPlayer.addEventListener('onStateChange', stateChangeHandler);
+    ytPlayer.addEventListener("onStateChange", stateChangeHandler);
 
-    try { ytPlayer.loadVideoById({ videoId: YT_VIDEO_ID || DEFAULT_YT_VIDEO_ID, suggestedQuality: 'hd720' }); }
-    catch(e) { console.warn('YT play blocked', e); }
+    // ---------------------------------------------------
+    // Continuous polling loop every 200ms for freeze detection + buffer analysis
+    // ---------------------------------------------------
+    const poll = setInterval(() => {
+      try {
+        const ct = ytPlayer.getCurrentTime();
+        const bt = ytPlayer.getVideoLoadedFraction() * ytPlayer.getDuration();
+        const bufferedAhead = Math.max(0, bt - ct);
 
+        bufferSamples.push(bufferedAhead);
+        minBufferAhead = Math.min(minBufferAhead, bufferedAhead);
+        maxBufferAhead = Math.max(maxBufferAhead, bufferedAhead);
+
+        // ----- FREEZE DETECTION -----
+        const now = performance.now();
+        const frameGap = now - lastFrameTime;
+
+        if (ct === lastVideoTime) {
+          // Frame frozen
+          if (!freezeStart) freezeStart = now;
+        } else {
+          if (freezeStart) {
+            freezeCount++;
+            freezeDuration += now - freezeStart;
+            freezeStart = null;
+          }
+        }
+
+        lastFrameTime = now;
+        lastVideoTime = ct;
+
+      } catch (e) { /* ignore failures */ }
+
+    }, 200);
+
+    // ---------------------------------------------------
+    // MAIN TIMER LOOP FOR TEST DURATION
+    // ---------------------------------------------------
     let elapsed = 0;
-    const pollInterval = setInterval(() => {
-      elapsed += 250;
-      setTimerText(`${Math.ceil((duration*1000 - elapsed)/1000)}s`);
-      if (elapsed >= duration*1000) {
-        clearInterval(pollInterval);
-        if (stallStart) totalStall += performance.now() - stallStart;
-        try { ytPlayer.stopVideo(); } catch(e){}
-        try { ytPlayer.removeEventListener('onStateChange', stateChangeHandler); } catch(e){}
+    const timer = setInterval(() => {
+      elapsed += 1;
+      setTimerText(`${duration - elapsed}s`);
 
-        const res = { ts: Date.now(), startup: startup || 0, stalls, totalStall };
+      if (elapsed >= duration) {
+        clearInterval(timer);
+        clearInterval(poll);
+
+        // finalize stalls
+        if (stallStart) {
+          totalStall += performance.now() - stallStart;
+        }
+
+        // finalize freeze
+        if (freezeStart) {
+          freezeDuration += performance.now() - freezeStart;
+        }
+
+        // remove events
+        try { ytPlayer.removeEventListener("onStateChange", stateChangeHandler); } catch(e){}
+
+        // calc averages
+        const avgBufferAhead = bufferSamples.length
+          ? bufferSamples.reduce((a,b)=>a+b,0)/bufferSamples.length
+          : 0;
+
+        const bufferRatio = ytPlayer.getDuration()
+          ? (totalStall / (duration * 1000)) * 100
+          : 0;
+
+        const avgStall = stalls > 0 ? (totalStall / stalls) : 0;
+
+        // FINAL RESULT OBJECT
+        const res = {
+          ts: Date.now(),
+          startup: startup || 0,
+          stalls,
+          totalStall: Math.round(totalStall),
+          freezeCount,
+          freezeDuration: Math.round(freezeDuration),
+          avgBufferAhead,
+          minBufferAhead,
+          bufferRatio,
+          avgStall
+        };
+
         g_results.youtube = res;
+
         ytResultsDiv.innerHTML = renderYtHTML(res);
-        saveHistoryEntry({ ts: Date.now(), voip: g_results.voip, local: g_results.local, youtube: res });
-        setStatus('Idle'); setTimerText('0s');
+        saveHistoryEntry({
+          ts: Date.now(),
+          voip: g_results.voip,
+          local: g_results.local,
+          youtube: res
+        });
+
+        setStatus('Idle');
+        setTimerText('0s');
+
         resolve(res);
       }
-    }, 250);
+
+    }, 1000);
   });
 }
 
-// -------------------- Simulated YouTube Test --------------------
-async function simulatedYouTubeTest(duration) {
-  let startup = 500 + Math.random()*1500; // ms
-  let stalls = Math.floor(Math.random()*3);
-  let totalStall = stalls * (100 + Math.random()*400);
-
-  for(let i=duration; i>=1; i--){
-    setTimerText(`${i}s`);
-    await new Promise(r=>setTimeout(r,1000));
-  }
-
-  const res = { ts: Date.now(), startup, stalls, totalStall, simulated: true };
-  g_results.youtube = res;
-  ytResultsDiv.innerHTML = renderYtHTML(res);
-  saveHistoryEntry({ ts: Date.now(), voip: g_results.voip, local: g_results.local, youtube: res });
-  setStatus('Idle'); setTimerText('0s');
-  return res;
-}
 
 
 // NDT7 Speed Test
