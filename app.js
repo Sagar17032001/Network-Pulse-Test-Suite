@@ -369,6 +369,8 @@ const YT_VIDEOS = [
   '2Vv-BfVoq4g'  // Ed Sheeran - Perfect
 ];
 
+const DEFAULT_YT_VIDEO_ID = 'aqz-KE-bpKQ';
+
 function pickRandomVideo() {
   return YT_VIDEOS[Math.floor(Math.random() * YT_VIDEOS.length)];
 }
@@ -734,34 +736,35 @@ async function runAll(email){
   }
 }
 
-// -------------------- Utilities: export CSV/JSON/PDF --------------------
+// -------------------- Utilities: export CSV/JSON/PDF with units --------------------
 function exportCSV() {
   if (!g_results) { alert("No test results available!"); return; }
 
   const rows = [['Test', 'Metric', 'Value']];
-  
+
   if (g_results.voip) {
-    rows.push(['VoIP', 'Latency_ms', g_results.voip.latencyMs]);
-    rows.push(['VoIP', 'Jitter_ms', g_results.voip.avgJitterMs]);
-    rows.push(['VoIP', 'PacketsReceived', g_results.voip.packetsReceived]);
-    rows.push(['VoIP', 'PacketsLost', g_results.voip.packetsLost]);
-    rows.push(['VoIP', 'MOS', g_results.voip.MOS]);
+    rows.push(['VoIP', 'Latency', `${g_results.voip.latencyMs.toFixed(2)} ms`]);
+    rows.push(['VoIP', 'Jitter', `${g_results.voip.avgJitterMs.toFixed(2)} ms`]);
+    rows.push(['VoIP', 'Packets Received', g_results.voip.packetsReceived]);
+    rows.push(['VoIP', 'Packets Lost', g_results.voip.packetsLost]);
+    rows.push(['VoIP', 'Packet Loss', `${g_results.voip.lossPercent.toFixed(2)} %`]);
+    rows.push(['VoIP', 'MOS', g_results.voip.MOS.toFixed(2)]);
   }
   if (g_results.local) {
-    rows.push(['Local', 'Startup_ms', g_results.local.startup]);
+    rows.push(['Local', 'Startup', `${Math.round(g_results.local.startup)} ms`]);
     rows.push(['Local', 'Stalls', g_results.local.stalls]);
-    rows.push(['Local', 'TotalStall_ms', g_results.local.totalStall]);
+    rows.push(['Local', 'Total Stall', `${Math.round(g_results.local.totalStall)} ms`]);
   }
   if (g_results.youtube) {
-    rows.push(['YouTube', 'Startup_ms', g_results.youtube.startup]);
+    rows.push(['YouTube', 'Startup', `${Math.round(g_results.youtube.startup)} ms`]);
     rows.push(['YouTube', 'Stalls', g_results.youtube.stalls]);
-    rows.push(['YouTube', 'TotalStall_ms', g_results.youtube.totalStall]);
+    rows.push(['YouTube', 'Total Stall', `${Math.round(g_results.youtube.totalStall)} ms`]);
   }
   if (g_results.speed) {
-    rows.push(['Speed', 'Download_Mbps', g_results.speed.download]);
-    rows.push(['Speed', 'Upload_Mbps', g_results.speed.upload]);
-    rows.push(['Speed', 'Ping_ms', g_results.speed.ping]);
-    rows.push(['Speed', 'Jitter_ms', g_results.speed.jitter]);
+    rows.push(['Speed', 'Download', `${(g_results.speed.download||0).toFixed(2)} Mbps`]);
+    rows.push(['Speed', 'Upload', `${(g_results.speed.upload||0).toFixed(2)} Mbps`]);
+    rows.push(['Speed', 'Ping', `${Math.round(g_results.speed.ping||0)} ms`]);
+    rows.push(['Speed', 'Jitter', `${Math.round(g_results.speed.jitter||0)} ms`]);
   }
 
   const csv = rows.map(r => r.map(c =>
@@ -784,7 +787,29 @@ function exportCSV() {
 function exportJSON() {
   if (!g_results) { alert("No test results available!"); return; }
 
-  const blob = new Blob([JSON.stringify(g_results, null, 2)], { type: 'application/json' });
+  // attach units in JSON
+  const resultsWithUnits = JSON.parse(JSON.stringify(g_results));
+  if (resultsWithUnits.voip) {
+    resultsWithUnits.voip.latencyMs += ' ms';
+    resultsWithUnits.voip.avgJitterMs += ' ms';
+    resultsWithUnits.voip.lossPercent += ' %';
+  }
+  if (resultsWithUnits.local) {
+    resultsWithUnits.local.startup += ' ms';
+    resultsWithUnits.local.totalStall += ' ms';
+  }
+  if (resultsWithUnits.youtube) {
+    resultsWithUnits.youtube.startup += ' ms';
+    resultsWithUnits.youtube.totalStall += ' ms';
+  }
+  if (resultsWithUnits.speed) {
+    resultsWithUnits.speed.download += ' Mbps';
+    resultsWithUnits.speed.upload += ' Mbps';
+    resultsWithUnits.speed.ping += ' ms';
+    resultsWithUnits.speed.jitter += ' ms';
+  }
+
+  const blob = new Blob([JSON.stringify(resultsWithUnits, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -808,22 +833,23 @@ function exportPDF() {
   doc.text('QoE Test Results', 14, 18);
   let y = 28;
 
-  function addSection(title, metrics) {
+  function addSection(title, metrics, unitsMap = {}){
     if (!metrics) return;
     doc.setFontSize(12); doc.text(title, 14, y); y += 6;
     doc.setFontSize(10);
     for (const [key, value] of Object.entries(metrics)) {
-      const text = `${key}: ${typeof value === 'number' ? value.toFixed(2) : value}`;
-      doc.text(text, 16, y); y += 6;
-      if (y > 280) { doc.addPage(); y = 20; } // page break
+      let val = value;
+      if(unitsMap[key]) val = `${val} ${unitsMap[key]}`;
+      doc.text(`${key}: ${val}`, 16, y); y += 6;
+      if (y > 280) { doc.addPage(); y = 20; }
     }
     y += 4;
   }
 
-  addSection('VoIP', g_results.voip);
-  addSection('Local Video', g_results.local);
-  addSection('YouTube', g_results.youtube);
-  addSection('Speed', g_results.speed);
+  addSection('VoIP', g_results.voip, { latencyMs:'ms', avgJitterMs:'ms', lossPercent:'%' });
+  addSection('Local Video', g_results.local, { startup:'ms', totalStall:'ms' });
+  addSection('YouTube', g_results.youtube, { startup:'ms', totalStall:'ms' });
+  addSection('Speed', g_results.speed, { download:'Mbps', upload:'Mbps', ping:'ms', jitter:'ms' });
 
   doc.save(`qoe_${new Date().toISOString().replace(/:/g,'-')}.pdf`);
 }
