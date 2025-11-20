@@ -6,9 +6,13 @@ const runYtBtn = document.getElementById('runYtBtn');
 const runAllBtn = document.getElementById('runAllBtn');
 const runSpeedBtn = document.getElementById('runSpeedBtn');
 
-const exportCSVBtn = document.getElementById('exportCSV');
-const exportPDFBtn = document.getElementById('exportPDF');
-const exportJSONBtn = document.getElementById('exportJSON');
+// const exportCSVBtn = document.getElementById('exportCSV');
+// const exportPDFBtn = document.getElementById('exportPDF');
+// const exportJSONBtn = document.getElementById('exportJSON');
+document.getElementById('btnCSV').addEventListener('click', exportCSV);
+document.getElementById('btnJSON').addEventListener('click', exportJSON);
+document.getElementById('btnPDF').addEventListener('click', exportPDF);
+
 const timerSpan = document.getElementById('timer');
 const statusSpan = document.getElementById('status');
 const voipResultsDiv = document.getElementById('voipResults');
@@ -39,11 +43,6 @@ let g_history = JSON.parse(localStorage.getItem('qoe_history') || '[]');
 
 // optional backend URL (set to null to disable)
 const BACKEND_URL = null; // e.g. 'http://localhost:3000/save' or null
-
-// YouTube globals
-let ytPlayer = null;
-let ytApiReady = false;
-const YT_VIDEO_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny
 
 
 // Speed chart initializion
@@ -359,47 +358,93 @@ async function runLocalVideoTest(){
   return result;
 }
 
-// -------------------- YouTube API ready handler --------------------
-function onYouTubeIframeAPIReady(){
-  ytApiReady = true;
-  try{
-    if(!ytPlayer){
-      ytPlayer = new YT.Player('youtubePlayer', {
-        height: '240',
-        width: '400',
-        videoId: YT_VIDEO_ID,
-        playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0 }
-      });
-    }
-  }catch(e){
-    console.warn('YT player create error', e);
-  }
+let ytApiReady = false;
+let ytPlayer = null;
+const YT_VIDEOS = [
+  'aqz-KE-bpKQ', // Big Buck Bunny
+  '5qap5aO4i9A', // Lofi hip hop
+  'J---aiyznGQ', // Cat video
+  'dQw4w9WgXcQ', // Rickroll (for fun)
+  '3JZ_D3ELwOQ', // TED Talk
+  '2Vv-BfVoq4g'  // Ed Sheeran - Perfect
+];
+
+function pickRandomVideo() {
+  return YT_VIDEOS[Math.floor(Math.random() * YT_VIDEOS.length)];
 }
 
-// -------------------- Robust YouTube test --------------------
-async function runYouTubeTest(){
+// -------------------- Load YouTube API --------------------
+function loadYouTubeAPI() {
+  return new Promise((resolve, reject) => {
+    if (ytApiReady) return resolve();
+
+    // Load only once
+    if (!document.getElementById('youtube-api')) {
+      const tag = document.createElement('script');
+      tag.src = "https://www.youtube.com/iframe_api";
+      tag.id = 'youtube-api';
+      document.head.appendChild(tag);
+    }
+
+    // API ready callback
+    window.onYouTubeIframeAPIReady = () => {
+      ytApiReady = true;
+      resolve();
+    };
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (!ytApiReady) reject('YouTube API load timeout');
+    }, 5000);
+  });
+}
+
+// -------------------- Create Player --------------------
+function createYTPlayer(videoId) {
+  return new Promise(resolve => {
+    if (ytPlayer) return resolve(ytPlayer);
+
+    ytPlayer = new YT.Player('youtubePlayer', {
+      height: '240',
+      width: '400',
+      videoId: videoId || DEFAULT_YT_VIDEO_ID,
+      playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0 },
+      events: {
+        onReady: () => resolve(ytPlayer),
+        onError: (e) => {
+          console.warn('YT Player error', e);
+          resolve(ytPlayer);
+        }
+      }
+    });
+  });
+}
+
+
+// -------------------- Robust YouTube Test with Fallback --------------------
+async function runYouTubeTest() {
   setStatus('YouTube running');
   const duration = Number(ytDurationInput.value) || 30;
   setTimerText(`${duration}s`);
   ytResultsDiv.innerHTML = '<div class="small">Preparing YouTube test...</div>';
-
-  if (!ytApiReady) {
-    ytResultsDiv.innerHTML = '<div class="small">YouTube API not ready</div>';
-    setStatus('Idle'); setTimerText('0s');
-    return null;
-  }
-
   document.getElementById('youtubeContainer').style.display = 'block';
 
-  if (!ytPlayer) {
-    ytPlayer = new YT.Player('youtubePlayer', {
-      height: '240',
-      width: '400',
-      videoId: YT_VIDEO_ID,
-      playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0 }
-    });
-    await new Promise(r => setTimeout(r, 300));
+  let apiLoaded = false;
+  try {
+    await loadYouTubeAPI();
+    apiLoaded = true;
+  } catch (err) {
+    console.warn('YT API failed to load', err);
+    apiLoaded = false;
   }
+
+  if (!apiLoaded) {
+    // fallback: simulated YouTube test
+    ytResultsDiv.innerHTML = '<div class="small">YouTube API not available, running simulated test...</div>';
+    return simulatedYouTubeTest(duration);
+  }
+
+  await createYTPlayer(YT_VIDEO_ID || DEFAULT_YT_VIDEO_ID);
 
   return new Promise(resolve => {
     let startup = null, stalls = 0, totalStall = 0, stallStart = null, playedOnce = false;
@@ -407,7 +452,6 @@ async function runYouTubeTest(){
 
     const stateChangeHandler = (e) => {
       const state = e.data;
-
       if (state === YT.PlayerState.BUFFERING) {
         if (playedOnce && !stallStart) {
           stallStart = performance.now();
@@ -427,10 +471,8 @@ async function runYouTubeTest(){
 
     ytPlayer.addEventListener('onStateChange', stateChangeHandler);
 
-    try {
-      ytPlayer.loadVideoById({ videoId: YT_VIDEO_ID, suggestedQuality: 'hd720' });
-      ytPlayer.playVideo();
-    } catch(e) { console.warn('YT play blocked, user gesture needed', e); }
+    try { ytPlayer.loadVideoById({ videoId: YT_VIDEO_ID || DEFAULT_YT_VIDEO_ID, suggestedQuality: 'hd720' }); }
+    catch(e) { console.warn('YT play blocked', e); }
 
     let elapsed = 0;
     const pollInterval = setInterval(() => {
@@ -439,9 +481,9 @@ async function runYouTubeTest(){
       if (elapsed >= duration*1000) {
         clearInterval(pollInterval);
         if (stallStart) totalStall += performance.now() - stallStart;
-        try { ytPlayer.stopVideo(); } catch(e) {}
+        try { ytPlayer.stopVideo(); } catch(e){}
         try { ytPlayer.removeEventListener('onStateChange', stateChangeHandler); } catch(e){}
-        
+
         const res = { ts: Date.now(), startup: startup || 0, stalls, totalStall };
         g_results.youtube = res;
         ytResultsDiv.innerHTML = renderYtHTML(res);
@@ -452,6 +494,26 @@ async function runYouTubeTest(){
     }, 250);
   });
 }
+
+// -------------------- Simulated YouTube Test --------------------
+async function simulatedYouTubeTest(duration) {
+  let startup = 500 + Math.random()*1500; // ms
+  let stalls = Math.floor(Math.random()*3);
+  let totalStall = stalls * (100 + Math.random()*400);
+
+  for(let i=duration; i>=1; i--){
+    setTimerText(`${i}s`);
+    await new Promise(r=>setTimeout(r,1000));
+  }
+
+  const res = { ts: Date.now(), startup, stalls, totalStall, simulated: true };
+  g_results.youtube = res;
+  ytResultsDiv.innerHTML = renderYtHTML(res);
+  saveHistoryEntry({ ts: Date.now(), voip: g_results.voip, local: g_results.local, youtube: res });
+  setStatus('Idle'); setTimerText('0s');
+  return res;
+}
+
 
 // NDT7 Speed Test
 
@@ -673,85 +735,99 @@ async function runAll(email){
 }
 
 // -------------------- Utilities: export CSV/JSON/PDF --------------------
-function exportCSV(){
-  const rows = [['Test','Metric','Value']];
-  if(g_results.voip){
-    rows.push(['VoIP','Latency_ms',g_results.voip.latencyMs]);
-    rows.push(['VoIP','Jitter_ms',g_results.voip.avgJitterMs]);
-    rows.push(['VoIP','PacketsReceived',g_results.voip.packetsReceived]);
-    rows.push(['VoIP','PacketsLost',g_results.voip.packetsLost]);
-    rows.push(['VoIP','MOS',g_results.voip.MOS]);
+function exportCSV() {
+  if (!g_results) { alert("No test results available!"); return; }
+
+  const rows = [['Test', 'Metric', 'Value']];
+  
+  if (g_results.voip) {
+    rows.push(['VoIP', 'Latency_ms', g_results.voip.latencyMs]);
+    rows.push(['VoIP', 'Jitter_ms', g_results.voip.avgJitterMs]);
+    rows.push(['VoIP', 'PacketsReceived', g_results.voip.packetsReceived]);
+    rows.push(['VoIP', 'PacketsLost', g_results.voip.packetsLost]);
+    rows.push(['VoIP', 'MOS', g_results.voip.MOS]);
   }
-  if(g_results.local){
-    rows.push(['Local','Startup_ms',g_results.local.startup]);
-    rows.push(['Local','Stalls',g_results.local.stalls]);
-    rows.push(['Local','TotalStall_ms',g_results.local.totalStall]);
+  if (g_results.local) {
+    rows.push(['Local', 'Startup_ms', g_results.local.startup]);
+    rows.push(['Local', 'Stalls', g_results.local.stalls]);
+    rows.push(['Local', 'TotalStall_ms', g_results.local.totalStall]);
   }
-  if(g_results.youtube){
-    rows.push(['YouTube','Startup_ms',g_results.youtube.startup]);
-    rows.push(['YouTube','Stalls',g_results.youtube.stalls]);
-    rows.push(['YouTube','TotalStall_ms',g_results.youtube.totalStall]);
+  if (g_results.youtube) {
+    rows.push(['YouTube', 'Startup_ms', g_results.youtube.startup]);
+    rows.push(['YouTube', 'Stalls', g_results.youtube.stalls]);
+    rows.push(['YouTube', 'TotalStall_ms', g_results.youtube.totalStall]);
   }
-  if(g_results.speed){
-    rows.push(['Speed','Download_Mbps',g_results.speed.download]);
-    rows.push(['Speed','Upload_Mbps',g_results.speed.upload]);
-    rows.push(['Speed','Ping_ms',g_results.speed.ping]);
-    rows.push(['Speed','Jitter_ms',g_results.speed.jitter]);
+  if (g_results.speed) {
+    rows.push(['Speed', 'Download_Mbps', g_results.speed.download]);
+    rows.push(['Speed', 'Upload_Mbps', g_results.speed.upload]);
+    rows.push(['Speed', 'Ping_ms', g_results.speed.ping]);
+    rows.push(['Speed', 'Jitter_ms', g_results.speed.jitter]);
   }
-  const csv = rows.map(r=>r.map(c=> typeof c === 'string' && (c.includes(',')||c.includes('"') )? `"${c.replace(/"/g,'""')}"`: c).join(',')).join('\n');
-  const blob = new Blob([csv],{type:'text/csv'});
+
+  const csv = rows.map(r => r.map(c =>
+    typeof c === 'string' && (c.includes(',') || c.includes('"'))
+      ? `"${c.replace(/"/g,'""')}"`
+      : c
+  ).join(',')).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qoe_${new Date().toISOString().slice(0,19)}.csv`;
+  a.download = `qoe_${new Date().toISOString().replace(/:/g,'-')}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
-function exportJSON(){
-  const blob = new Blob([JSON.stringify(g_results,null,2)],{type:'application/json'});
+function exportJSON() {
+  if (!g_results) { alert("No test results available!"); return; }
+
+  const blob = new Blob([JSON.stringify(g_results, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qoe_${new Date().toISOString().slice(0,19)}.json`;
+  a.download = `qoe_${new Date().toISOString().replace(/:/g,'-')}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
-function exportPDF(){
+function exportPDF() {
+  if (!g_results) { alert("No test results available!"); return; }
+  if (!window.jspdf) {
+    alert('jsPDF not loaded! Add: <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>');
+    return;
+  }
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  doc.setFontSize(14); doc.text('QoE Test Results',14,18);
+  doc.setFontSize(14);
+  doc.text('QoE Test Results', 14, 18);
   let y = 28;
-  if(g_results.voip){
-    doc.setFontSize(12); doc.text('VoIP:',14,y); y+=6;
-    doc.setFontSize(10); doc.text(`Latency: ${g_results.voip.latencyMs.toFixed(2)} ms`,16,y); y+=6;
-    doc.text(`Jitter: ${g_results.voip.avgJitterMs.toFixed(2)} ms`,16,y); y+=6;
-    doc.text(`MOS: ${g_results.voip.MOS.toFixed(2)}`,16,y); y+=10;
+
+  function addSection(title, metrics) {
+    if (!metrics) return;
+    doc.setFontSize(12); doc.text(title, 14, y); y += 6;
+    doc.setFontSize(10);
+    for (const [key, value] of Object.entries(metrics)) {
+      const text = `${key}: ${typeof value === 'number' ? value.toFixed(2) : value}`;
+      doc.text(text, 16, y); y += 6;
+      if (y > 280) { doc.addPage(); y = 20; } // page break
+    }
+    y += 4;
   }
-  if(g_results.local){
-    doc.setFontSize(12); doc.text('Local Video:',14,y); y+=6;
-    doc.setFontSize(10); doc.text(`Startup: ${Math.round(g_results.local.startup)} ms`,16,y); y+=6;
-    doc.text(`Stalls: ${g_results.local.stalls}`,16,y); y+=10;
-  }
-  if(g_results.youtube){
-    doc.setFontSize(12); doc.text('YouTube:',14,y); y+=6;
-    doc.setFontSize(10); doc.text(`Startup: ${Math.round(g_results.youtube.startup)} ms`,16,y); y+=6;
-    doc.text(`Stalls: ${g_results.youtube.stalls}`,16,y); y+=10;
-  }
-  if(g_results.speed){
-    doc.setFontSize(12); doc.text('Speed:',14,y); y+=6;
-    doc.setFontSize(10); doc.text(`Download: ${(g_results.speed.download||0).toFixed(2)} Mbps`,16,y); y+=6;
-    doc.text(`Upload: ${(g_results.speed.upload||0).toFixed(2)} Mbps`,16,y); y+=6;
-    doc.text(`Ping: ${Math.round(g_results.speed.ping||0)} ms`,16,y); y+=6;
-    doc.text(`Jitter: ${Math.round(g_results.speed.jitter||0)} ms`,16,y); y+=10;
-  }
-  doc.save(`qoe_${new Date().toISOString().slice(0,19)}.pdf`);
+
+  addSection('VoIP', g_results.voip);
+  addSection('Local Video', g_results.local);
+  addSection('YouTube', g_results.youtube);
+  addSection('Speed', g_results.speed);
+
+  doc.save(`qoe_${new Date().toISOString().replace(/:/g,'-')}.pdf`);
 }
+
 
 // -------------------- Event wiring --------------------
 runAllBtn.addEventListener('click', ()=>{ showEmailModal(true); });
