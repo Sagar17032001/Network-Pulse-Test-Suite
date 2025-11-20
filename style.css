@@ -38,8 +38,46 @@ h1{margin:0;font-size:28px}
 
 /* timer/status */
 .right{display:flex;flex-direction:column;gap:8px;align-items:flex-end}
-.timer-box{font-weight:700;color:#0b3b66}
-.status-box{font-size:13px;color:var(--muted)}
+.timer-box,
+.status-box {
+  background: #ffffff;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+  border: 1px solid #eef2f7;
+  min-width: 140px;
+  justify-content: center;
+}
+
+/* Timer styling */
+.timer-box {
+  color: #0b3b66;
+  font-size: 15px;
+}
+
+/* Status styling */
+.status-box {
+  color: #5a6b7e;
+  font-size: 14px;
+}
+
+/* Highlight different states dynamically */
+.status-box.running {
+  color: #0f7b2d;
+}
+
+.status-box.error {
+  color: #c62828;
+}
+
+.status-box.idle {
+  color: #5a6b7e;
+}
+
 
 /* results grid */
 .results-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:18px}
@@ -108,6 +146,8 @@ h1{margin:0;font-size:28px}
   background: #f6f9ff;
   border-radius: 8px;
 }
+
+
 
 
 /* modal */
