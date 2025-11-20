@@ -28,17 +28,18 @@
     
 
     <section class="controls-card">
+      
       <div class="left">
-        <label>VoIP Duration (sec)
+        <label>VoIP Duration (sec):
           <input id="voipDuration" type="number" min="5" max="300" value="30">
         </label>
-        <label>Video Duration (sec)
+        <label>Video Duration (sec):
           <input id="videoDuration" type="number" min="5" max="120" value="30">
         </label>
-        <label>YouTube Duration (sec)
+        <label>YouTube Duration (sec):
           <input id="ytDuration" type="number" min="5" max="120" value="30">
         </label>
-        <label>Speed Test(sec)
+        <label>Speed Duration(sec):
           <input id="speedDuration" type="number" min="5" max="120" value="30">
         </label>
       </div>
@@ -50,20 +51,20 @@
         <button id="runAllBtn" class="btn accent">Run All (Email Required)</button>
         <!-- <button id="runSpeedBtn" class="btn">Run Speed Test</button> -->
         <button id="btnCSV" class="btn outline">Export CSV</button>
-        <button id="btnJSON" class="btn outline">Export JSON</button>
-        <button id="btnPDF" class="btn outline">Export PDF</button>
+        <button id="btnJSON" class="btn outline">Export PDF</button>
+        <button id="btnPDF" class="btn outline">Export JSON</button>
       </div>
 
       <div class="right">
         <div class="timer-box">Timer: <span id="timer">0s</span></div>
-        <div class="status-box">Status: <span id="status">Idle</span></div>
+        <div class="status-box"><h3>Status: </h3><span id="status">Idle</span></div>
       </div>
     </section>
 
     <section class="results-grid">
 
       <div class="card" id="voipCard">
-        <h3>VoIP Test using WebRTC</h3>
+        <h3>VoIP Test</h3>
         <div class="card-body">
           <canvas id="latencyChart" height="140"></canvas>
           <div id="voipResults" class="results"></div>
@@ -79,7 +80,7 @@
       </div>
 
       <div class="card" id="ytCard">
-        <h3>YouTube Test using iframes</h3>
+        <h3>YouTube Test</h3>
         <div class="card-body">
           <div id="youtubeContainer" style="display:none">
             <div id="youtubePlayer"></div>
@@ -89,7 +90,7 @@
       </div>
 
       <div class="card" id="speedCard">
-        <h3>Speed Test using NDT7</h3>
+        <h3>Speed Test</h3>
         <div class="card-body">
           <canvas id="speedChart" height="140"></canvas>
           <div id="speedResults" class="results small">
