@@ -89,10 +89,12 @@
       </div>
 
       <div class="card" id="speedCard">
-        <h3>Speed Test (LibreSpeed)</h3>
+        <h3>Speed Test</h3>
         <div class="card-body">
-          <div id="speedControl" class="small">LibreSpeed client will be used (auto-run). If unavailable, a simulated test is run.</div>
-          <div id="speedResults" class="results"></div>
+          <canvas id="speedChart" height="140"></canvas>
+          <div id="speedResults" class="results small">
+            Speed test will auto-run; if NDT7 is unavailable, a simulated test will run.
+          </div>
         </div>
       </div>
 
@@ -125,5 +127,7 @@
   </div>
 
   <script src="app.js" defer></script>
+  <script src="https://unpkg.com/ndt7/dist/ndt7.min.js"></script>
+
 </body>
 </html>
