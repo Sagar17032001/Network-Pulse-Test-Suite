@@ -89,6 +89,26 @@ h1{margin:0;font-size:28px}
   opacity: 0.8;
 }
 
+/* Speed Test Chart */
+#speedChart {
+  width: 100% !important;
+  max-height: 140px;
+  display: block;
+  margin: 0 auto;
+  background: #f6f9ff;
+  border-radius: 8px;
+}
+
+/* VoIP Chart */
+#latencyChart {
+  width: 100% !important;
+  max-height: 140px;
+  display: block;
+  margin: 0 auto;
+  background: #f6f9ff;
+  border-radius: 8px;
+}
+
 
 /* modal */
 .modal-backdrop{position:fixed;inset:0;background:rgba(4,10,20,0.45);display:flex;align-items:center;justify-content:center;z-index:2000;visibility:hidden;opacity:0;transition:opacity .18s,visibility .18s;}
