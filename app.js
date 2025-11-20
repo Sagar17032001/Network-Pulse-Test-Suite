@@ -198,7 +198,7 @@ function renderSpeedHTML(speed){
 
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
 async function runVoipTest(durationSec){
-  setStatus('VoIP running');
+  setStatus('VoIP test running');
   setTimerText(`${durationSec}s`);
   voipResultsDiv.innerHTML = '<div class="small">Preparing...</div>';
   window.__webrtc_rtts = [];
@@ -395,7 +395,7 @@ function updateCharts(latency, jitter){
 
 // -------------------- Local Video Test (Stable + Complete) --------------------
 async function runLocalVideoTest() {
-  setStatus('Local video running');
+  setStatus('Local video test running');
   const duration = Number(videoDurationInput.value) || 30;
   setTimerText(`${duration}s`);
   localResultsDiv.innerHTML = '<div class="small">Preparing local video test...</div>';
@@ -634,7 +634,7 @@ function createYTPlayer(videoId) {
 //              YOUTUBE TEST — FULL METRICS
 // ======================================================
 async function runYouTubeTest() {
-  setStatus('YouTube running');
+  setStatus('YouTube test running');
 
   const duration = Number(ytDurationInput.value) || 30;
   setTimerText(`${duration}s`);
