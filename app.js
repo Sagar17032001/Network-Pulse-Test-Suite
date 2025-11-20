@@ -191,10 +191,11 @@ function renderYtHTML(yt){
 function renderSpeedHTML(speed){
   if(!speed) return `<div class="small">No speed result</div>`;
   return `<div class="small">Download: <span class="value">${(speed.download||0).toFixed(2)} Mbps</span></div>
-          <div class="small">Upload: <span class="value">${(speed.upload||0).toFixed(2)} Mbps</span></div>
-          <div class="small">Ping: <span class="value">${Math.round(speed.ping||0)} ms</span></div>
-          <div class="small">Jitter: <span class="value">${Math.round(speed.jitter||0)} ms</span></div>`;
+          <div class="small">Upload: <span class="value">${(speed.upload||0).toFixed(2)} Mbps</span></div>`;
 }
+
+// <div class="small">Ping: <span class="value">${Math.round(speed.ping||0)} ms</span></div>
+// <div class="small">Jitter: <span class="value">${Math.round(speed.jitter||0)} ms</span></div>
 
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
 async function runVoipTest(durationSec){
