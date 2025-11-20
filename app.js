@@ -1,4 +1,4 @@
-/* app.js — Full feature set (old YouTube logic preserved) */
+/* app.js — Full feature set (NDT7 for speed test, old YouTube logic preserved) */
 // -------------------- Helpers & DOM --------------------
 const runVoipBtn = document.getElementById('runVoipBtn');
 const runLocalBtn = document.getElementById('runLocalBtn');
@@ -43,14 +43,31 @@ const BACKEND_URL = null; // e.g. 'http://localhost:3000/save' or null
 // YouTube globals
 let ytPlayer = null;
 let ytApiReady = false;
-const YT_VIDEO_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny
+const YT_VIDEO_ID = 'aqz-KE-bpKQ'; // Big Buck Bunny
 
-// LibreSpeed config (remote/CDN)
-const LIBRESPEED_JS = 'https://raw.githubusercontent.com/librespeed/speedtest/master/speedtest.js';
-const LIBRESPEED_SERVER = 'https://librespeed.org/';
-const LIBRESPEED_TIMEOUT_SEC = 40;
-let libreSpeedAvailable = false;
-let LibreSpeedClientConstructor = null;
+
+// Speed chart initializion
+let speedChart = null;
+function createSpeedChart() {
+  const ctx = document.getElementById('speedChart').getContext('2d');
+  speedChart = new Chart(ctx, {
+    type: 'line',
+    data: { 
+      labels: [], 
+      datasets:[
+        { label:'Download (Mbps)', data:[], borderColor:'#0b69ff', fill:false, tension:0.25 },
+        { label:'Upload (Mbps)', data:[], borderColor:'#00b37e', fill:false, tension:0.25 }
+      ]
+    },
+    options: { 
+      animation:false, 
+      responsive:true, 
+      scales:{ y:{ beginAtZero:true } } 
+    }
+  });
+}
+createSpeedChart();
+
 
 // WebRTC globals
 let pcSender = null, pcReceiver = null, dataChannel = null;
@@ -129,8 +146,18 @@ function renderVoipHTML(voip){
     <div class="small">Packet Loss %: <span class="value">${voip.lossPercent.toFixed(2)}%</span></div>
     <div class="small">MOS (est): <span class="value">${voip.MOS.toFixed(2)}</span></div>`;
 }
-function renderLocalHTML(local){ if(!local) return `<div class="small">No local video result</div>`; return `<div class="small">Startup: <span class="value">${Math.round(local.startup)} ms</span></div><div class="small">Stalls: <span class="value">${local.stalls}</span></div><div class="small">Total Stall: <span class="value">${Math.round(local.totalStall)} ms</span></div>`;}
-function renderYtHTML(yt){ if(!yt) return `<div class="small">No YouTube result</div>`; return `<div class="small">Startup: <span class="value">${Math.round(yt.startup)} ms</span></div><div class="small">Stalls: <span class="value">${yt.stalls}</span></div><div class="small">Total Stall: <span class="value">${Math.round(yt.totalStall)} ms</span></div>`;}
+function renderLocalHTML(local){
+  if(!local) return `<div class="small">No local video result</div>`;
+  return `<div class="small">Startup: <span class="value">${Math.round(local.startup)} ms</span></div>
+          <div class="small">Stalls: <span class="value">${local.stalls}</span></div>
+          <div class="small">Total Stall: <span class="value">${Math.round(local.totalStall)} ms</span></div>`;
+}
+function renderYtHTML(yt){
+  if(!yt) return `<div class="small">No YouTube result</div>`;
+  return `<div class="small">Startup: <span class="value">${Math.round(yt.startup)} ms</span></div>
+          <div class="small">Stalls: <span class="value">${yt.stalls}</span></div>
+          <div class="small">Total Stall: <span class="value">${Math.round(yt.totalStall)} ms</span></div>`;
+}
 function renderSpeedHTML(speed){
   if(!speed) return `<div class="small">No speed result</div>`;
   return `<div class="small">Download: <span class="value">${(speed.download||0).toFixed(2)} Mbps</span></div>
@@ -272,7 +299,6 @@ async function runVoipTest(durationSec){
 }
 
 function updateCharts(latency, jitter){
-  // push into latencyChart (latency dataset, jitter dataset)
   const labels = latencyChart.data.labels;
   const nowLabel = new Date().toLocaleTimeString();
   labels.push(nowLabel);
@@ -285,7 +311,7 @@ function updateCharts(latency, jitter){
 // -------------------- Local Video Test --------------------
 async function runLocalVideoTest(){
   setStatus('Local video running');
-  const duration = Number(videoDurationInput.value) ||30;
+  const duration = Number(videoDurationInput.value) || 30;
   setTimerText(`${duration}s`);
   localResultsDiv.innerHTML = '<div class="small">Preparing local video test...</div>';
 
@@ -333,14 +359,11 @@ async function runLocalVideoTest(){
   return result;
 }
 
-
-
 // -------------------- YouTube API ready handler --------------------
 function onYouTubeIframeAPIReady(){
   ytApiReady = true;
   try{
     if(!ytPlayer){
-      // Create player but don't auto-play (autoplay often blocked).
       ytPlayer = new YT.Player('youtubePlayer', {
         height: '240',
         width: '400',
@@ -353,319 +376,262 @@ function onYouTubeIframeAPIReady(){
   }
 }
 
-// -------------------- Fixed YouTube test --------------------
-async function runYouTubeTest() {
+// -------------------- Robust YouTube test --------------------
+async function runYouTubeTest(){
   setStatus('YouTube running');
-
   const duration = Number(ytDurationInput.value) || 30;
   setTimerText(`${duration}s`);
-
-  ytResultsDiv.innerHTML = '<div class="small">Preparing YouTube test (user gesture may be required)...</div>';
+  ytResultsDiv.innerHTML = '<div class="small">Preparing YouTube test...</div>';
 
   if (!ytApiReady) {
     ytResultsDiv.innerHTML = '<div class="small">YouTube API not ready</div>';
+    setStatus('Idle'); setTimerText('0s');
     return null;
   }
 
   document.getElementById('youtubeContainer').style.display = 'block';
 
-  // VARIABLES
-  let startup = null;
-  let stalls = 0;
-  let totalStall = 0;
-  let stallStart = null;
-  let playedOnce = false;
-
-  // Use an explicit timestamp for when we call loadVideoById()
-  let loadTs = null;
-
-  // Ensure player exists (should from API ready handler); wait briefly if not
   if (!ytPlayer) {
-    // create a player instance if somehow not created earlier
     ytPlayer = new YT.Player('youtubePlayer', {
       height: '240',
       width: '400',
       videoId: YT_VIDEO_ID,
       playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0 }
     });
-    // wait small time for readiness
     await new Promise(r => setTimeout(r, 300));
   }
 
-  // Promise that resolves when test completes
   return new Promise(resolve => {
-    // State change handler
-    function onStateChange(e) {
+    let startup = null, stalls = 0, totalStall = 0, stallStart = null, playedOnce = false;
+    const loadTs = performance.now();
+
+    const stateChangeHandler = (e) => {
       const state = e.data;
-      // BUFFERING
+
       if (state === YT.PlayerState.BUFFERING) {
-        // If already played once, this is a stall
         if (playedOnce && !stallStart) {
           stallStart = performance.now();
           stalls++;
         }
-      }
-      // PLAYING
-      else if (state === YT.PlayerState.PLAYING) {
-        // First time we get PLAYING -> startup measured here
+      } else if (state === YT.PlayerState.PLAYING) {
         if (!playedOnce) {
           playedOnce = true;
-          if (loadTs) {
-            startup = performance.now() - loadTs;
-          } else {
-            // fallback: 0 if we couldn't capture load time
-            startup = 0;
-          }
+          startup = performance.now() - loadTs;
         }
-        // If we were in stall, close it
         if (stallStart) {
           totalStall += performance.now() - stallStart;
           stallStart = null;
         }
       }
-      // ENDED or CUED or PAUSED - not directly relevant for a running test
-    }
+    };
 
-    // Attach handler
-    const boundHandler = onStateChange.bind(this);
-    ytPlayer.addEventListener('onStateChange', boundHandler); // older API compatible
+    ytPlayer.addEventListener('onStateChange', stateChangeHandler);
 
-    // Some players also support addEventListener with string event
-    try { ytPlayer.addEventListener('onStateChange', boundHandler); } catch(e){}
-
-    // Start the test: load + play. Record load timestamp immediately before loadVideoById().
-    loadTs = performance.now();
     try {
       ytPlayer.loadVideoById({ videoId: YT_VIDEO_ID, suggestedQuality: 'hd720' });
-    } catch(e) {
-      // ignore load error
-    }
+      ytPlayer.playVideo();
+    } catch(e) { console.warn('YT play blocked, user gesture needed', e); }
 
-    // Try to play (may be blocked by autoplay policy; user gesture required in that case).
-    try { ytPlayer.playVideo(); } catch(e){ /* ignore */ }
-
-    // Polling loop only to count time & update UI; actual stall detection via events above
-    const poll = 250;
     let elapsed = 0;
     const pollInterval = setInterval(() => {
-      elapsed += poll;
-      setTimerText(`${Math.ceil((duration * 1000 - elapsed) / 1000)}s`);
-      if (elapsed >= duration * 1000) {
+      elapsed += 250;
+      setTimerText(`${Math.ceil((duration*1000 - elapsed)/1000)}s`);
+      if (elapsed >= duration*1000) {
         clearInterval(pollInterval);
-
-        // If a stall is open, close it
-        if (stallStart) {
-          totalStall += performance.now() - stallStart;
-          stallStart = null;
-        }
-
-        // Stop the video if possible
-        try { ytPlayer.stopVideo(); } catch(e){}
-
-        // Remove event listener (best-effort)
-        try {
-          ytPlayer.removeEventListener('onStateChange', boundHandler);
-        } catch(e){}
-
-        // Prepare results
-        const res = {
-          ts: Date.now(),
-          startup: startup || 0,
-          stalls,
-          totalStall
-        };
-
-        // Save into global results and UI
+        if (stallStart) totalStall += performance.now() - stallStart;
+        try { ytPlayer.stopVideo(); } catch(e) {}
+        try { ytPlayer.removeEventListener('onStateChange', stateChangeHandler); } catch(e){}
+        
+        const res = { ts: Date.now(), startup: startup || 0, stalls, totalStall };
         g_results.youtube = res;
         ytResultsDiv.innerHTML = renderYtHTML(res);
-
-        saveHistoryEntry({
-          ts: Date.now(),
-          voip: g_results.voip,
-          local: g_results.local,
-          youtube: res
-        });
-
-        // Reset status/timer
-        setStatus('Idle');
-        setTimerText('0s');
-
+        saveHistoryEntry({ ts: Date.now(), voip: g_results.voip, local: g_results.local, youtube: res });
+        setStatus('Idle'); setTimerText('0s');
         resolve(res);
       }
-    }, poll);
+    }, 250);
   });
 }
 
+// NDT7 Speed Test
 
-// -------------------- LibreSpeed integration + fallback --------------------
-// (same as earlier; omitted here for brevity in explanation — full implementation below)
+async function runNdt7Test(timeoutSec = 30){
+  speedResultsDiv.innerHTML = '<div class="small">Starting NDT7 speed test...</div>';
+  setStatus('Speed test running');
+  setTimerText('0s');
 
-function loadRemoteScript(url, id){
-  return new Promise((resolve, reject)=>{
-    if(document.getElementById(id)){ resolve(); return; }
-    const s = document.createElement('script');
-    s.src = url;
-    if(id) s.id = id;
-    s.onload = ()=>resolve();
-    s.onerror = (e)=>reject(new Error('Script load error: '+url));
-    document.head.appendChild(s);
-  });
-}
-
-async function tryInitLibreSpeed(){
-  if(libreSpeedAvailable && typeof Speedtest === 'function') { LibreSpeedClientConstructor = Speedtest; return true; }
-  try {
-    await loadRemoteScript(LIBRESPEED_JS, 'librespeed-js');
-  } catch(e){
-    console.warn('Unable to load LibreSpeed client script:', e);
-    return false;
+  if(!('NDT7' in window)) {
+    await new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/@m-lab/ndt7/dist/ndt7.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    }).catch(()=>{ console.warn('NDT7 library failed to load'); });
   }
-  if(typeof window.Speedtest === 'function'){
-    LibreSpeedClientConstructor = window.Speedtest;
-    libreSpeedAvailable = true;
-    return true;
-  } else {
-    console.warn('Speedtest constructor not found after script load.');
-    return false;
-  }
-}
 
-async function runLibreSpeedTest(timeoutSec = LIBRESPEED_TIMEOUT_SEC){
-  speedResultsDiv.innerHTML = '<div class="small">Attempting LibreSpeed test (remote)...</div>';
-  if(!libreSpeedAvailable || !LibreSpeedClientConstructor){
-    throw new Error('LibreSpeed unavailable');
+  if(!('NDT7' in window)){
+    return simulatedSpeedTest(timeoutSec);
   }
-  return new Promise((resolve, reject)=>{
+
+  return new Promise(async (resolve, reject)=>{
     try {
-      const client = new LibreSpeedClientConstructor();
-      let ping = 0, jitter = 0, download = 0, upload = 0;
-      client.onupdate = (data) => {
-        const d = data && (data.dlStatus || data.dlBitsPerSec || data.download) || download;
-        const u = data && (data.ulStatus || data.ulBitsPerSec || data.upload) || upload;
-        const p = data && (data.pingMs || data.ping) || ping;
-        const j = data && (data.jitterMs || data.jitter) || jitter;
-        download = d; upload = u; ping = p; jitter = j;
-        speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${formatMbps(d)}</span></div>
-                                     <div class="small">Upload: <span class="value">${formatMbps(u)}</span></div>
-                                     <div class="small">Ping: <span class="value">${p?Math.round(p)+' ms':'—'}</span></div>
-                                     <div class="small">Jitter: <span class="value">${j?Math.round(j)+' ms':'—'}</span></div>`;
-      };
-      client.onend = (data) => {
-        const finalDl = data && (data.dlStatus || data.dlBitsPerSec || data.download) || download;
-        const finalUl = data && (data.ulStatus || data.ulBitsPerSec || data.upload) || upload;
-        const finalPing = data && (data.pingMs || data.ping) || ping;
-        const finalJitter = data && (data.jitterMs || data.jitter) || jitter;
-        const res = { ping: finalPing || 0, jitter: finalJitter || 0, download: normalizeToMbps(finalDl), upload: normalizeToMbps(finalUl), raw: data || {} };
-        g_results.speed = res;
-        speedResultsDiv.innerHTML = renderSpeedHTML(res);
-        saveHistoryEntry({ ts: Date.now(), email: null, voip: g_results.voip, local: g_results.local, youtube: g_results.youtube, speed: res });
-        resolve(res);
-      };
-      client.onfail = (err) => { reject(err); };
+      const downloadSamples = [];
+      const uploadSamples = [];
+      const pingSamples = [];
+      const jitterSamples = [];
 
-      try {
-        if(typeof client.start === 'function') {
-          try { client.start(LIBRESPEED_SERVER); } catch(e) { client.start(); }
-        } else if(typeof client.run === 'function') {
-          client.run();
-        } else if(typeof client.test === 'function') {
-          client.test();
-        } else {
-          throw new Error('No runnable method on LibreSpeed client');
-        }
-      } catch(e){
-        reject(e);
-      }
+      const test = new window.NDT7({
+        onMeasurement: (m)=>{
+          const download = m.Download_Mbps || 0;
+          const upload = m.Upload_Mbps || 0;
+          const ping = m.Latency_ms || 0;
+          const jitter = m.Jitter_ms || 0;
 
-      setTimeout(()=>{ reject(new Error('LibreSpeed timed out')); }, (timeoutSec + 5) * 1000);
+          downloadSamples.push(download);
+          uploadSamples.push(upload);
+          pingSamples.push(ping);
+          jitterSamples.push(jitter);
 
-    } catch(err){
-      reject(err);
+          speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
+                                       <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>
+                                       <div class="small">Ping: <span class="value">${Math.round(ping)} ms</span></div>
+                                       <div class="small">Jitter: <span class="value">${Math.round(jitter)} ms</span></div>`;
+
+          // update chart live
+          if(speedChart){
+            const nowLabel = new Date().toLocaleTimeString();
+            speedChart.data.labels.push(nowLabel);
+            speedChart.data.datasets[0].data.push(download);
+            speedChart.data.datasets[1].data.push(upload);
+            speedChart.data.datasets[2].data.push(ping);
+            speedChart.data.datasets[3].data.push(jitter);
+            if(speedChart.data.labels.length > 30){
+              speedChart.data.labels.shift();
+              speedChart.data.datasets.forEach(ds=>ds.data.shift());
+            }
+            speedChart.update();
+          }
+        },
+        onComplete: (m)=>{
+          const avgDownload = downloadSamples.length ? downloadSamples.reduce((a,b)=>a+b,0)/downloadSamples.length : 0;
+          const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
+          const avgPing = pingSamples.length ? pingSamples.reduce((a,b)=>a+b,0)/pingSamples.length : 0;
+          const avgJitter = jitterSamples.length ? jitterSamples.reduce((a,b)=>a+b,0)/jitterSamples.length : 0;
+
+          const res = {
+            download: avgDownload,
+            upload: avgUpload,
+            ping: avgPing,
+            jitter: avgJitter,
+            raw: m
+          };
+
+          g_results.speed = res;
+          speedResultsDiv.innerHTML = renderSpeedHTML(res);
+          saveHistoryEntry({
+            ts: Date.now(),
+            email: null,
+            voip: g_results.voip,
+            local: g_results.local,
+            youtube: g_results.youtube,
+            speed: res
+          });
+
+          setStatus('Speed test completed');
+          setTimerText('0s');
+          resolve(res);
+        },
+        onError: (err)=>{
+          console.warn('NDT7 error', err);
+          simulatedSpeedTest(timeoutSec).then(resolve);
+        },
+        timeout: timeoutSec * 1000
+      });
+      test.start();
+    } catch(e){
+      console.warn('NDT7 start failed', e);
+      simulatedSpeedTest(timeoutSec).then(resolve);
     }
   });
 }
 
-function formatMbps(val){
-  if(!val && val !== 0) return '—';
-  if(typeof val === 'string') return val;
-  if(typeof val === 'number'){
-    if(val > 1e6) return (val / (1024*1024)).toFixed(2) + ' Mbps';
-    if(val > 1000) return (val / (1024*1024)).toFixed(2) + ' Mbps';
-    return Number(val).toFixed(2) + ' Mbps';
-  }
-  return String(val);
-}
+// Simulated Speed Test
 
-function normalizeToMbps(v){
-  if(!v && v !== 0) return 0;
-  if(typeof v === 'string'){
-    const num = parseFloat(v.replace(/[^\d\.]/g,'')) || 0;
-    if(v.toLowerCase().includes('mb')) return num;
-    if(v.toLowerCase().includes('kb')) return num/1024;
-    return num;
-  }
-  if(typeof v === 'number'){
-    if(v > 1e6) return v / (1024*1024);
-    if(v > 1000 && v < 1e6) return v / (1024*1024);
-    return v;
-  }
-  return 0;
-}
-
-async function simulatedSpeedTest(seconds = (speedDuration.value) || 30){
-  speedResultsDiv.innerHTML = '<div class="small">LibreSpeed unavailable — running simulated test</div>';
+async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
+  speedResultsDiv.innerHTML = '<div class="small">Simulated speed test running...</div>';
   setStatus('Simulated speed running');
-  let download = 0, upload = 0, ping = 0, jitter = 0;
+
+  const downloadSamples = [];
+  const uploadSamples = [];
+
+  // clear chart
+  if(speedChart){
+    speedChart.data.labels = [];
+    speedChart.data.datasets.forEach(ds => ds.data = []);
+    speedChart.update();
+  }
+
   for(let i=seconds;i>=1;i--){
     setTimerText(`${i}s`);
-    download = 20 + Math.random()*80;
-    upload = 5 + Math.random()*50;
-    ping = 10 + Math.random()*50;
-    jitter = Math.random()*10;
+    const download = 20 + Math.random()*80;
+    const upload = 5 + Math.random()*50;
+    downloadSamples.push(download);
+    uploadSamples.push(upload);
+
     speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
-                                 <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>
-                                 <div class="small">Ping: <span class="value">${Math.round(ping)} ms</span></div>
-                                 <div class="small">Jitter: <span class="value">${Math.round(jitter)} ms</span></div>`;
+                                 <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`;
+
+    // update chart
+    if(speedChart){
+      const nowLabel = new Date().toLocaleTimeString();
+      speedChart.data.labels.push(nowLabel);
+      speedChart.data.datasets[0].data.push(download);
+      speedChart.data.datasets[1].data.push(upload);
+      if(speedChart.data.labels.length > 30){
+        speedChart.data.labels.shift();
+        speedChart.data.datasets.forEach(ds=>ds.data.shift());
+      }
+      speedChart.update();
+    }
+
     await new Promise(r=>setTimeout(r,1000));
   }
+
+  const avgDownload = downloadSamples.length ? downloadSamples.reduce((a,b)=>a+b,0)/downloadSamples.length : 0;
+  const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
+
   setTimerText('0s'); setStatus('Idle');
-  const res = { download, upload, ping, jitter, simulated: true };
+  const res = { download: avgDownload, upload: avgUpload, ping: 0, jitter: 0, simulated: true };
   g_results.speed = res;
   saveHistoryEntry({ ts: Date.now(), email: null, voip: g_results.voip, local: g_results.local, youtube: g_results.youtube, speed: res });
+  speedResultsDiv.innerHTML = renderSpeedHTML(res);
   return res;
 }
 
+
+// -------------------- Run Speed Test --------------------
 async function runSpeedTest(){
-  setStatus('Speed test running');
-  setTimerText('0s');
   try {
-    const ok = await tryInitLibreSpeed();
-    if(ok){
-      try {
-        const result = await runLibreSpeedTest(LIBRESPEED_TIMEOUT_SEC);
-        setStatus('Speed test completed');
-        setTimerText('0s');
-        return result;
-      } catch(err){
-        console.warn('LibreSpeed run failed', err);
-        const sim = await simulatedSpeedTest(30);
-        return sim;
-      }
-    } else {
-      const sim = await simulatedSpeedTest(30);
-      return sim;
-    }
+    const res = await runNdt7Test(Number(speedDurationInput.value)||30);
+    return res;
   } catch(e){
-    console.warn('Speed test error', e);
-    const sim = await simulatedSpeedTest(30);
-    return sim;
+    console.warn('Speed test failed', e);
+    return simulatedSpeedTest(Number(speedDurationInput.value)||30);
   }
 }
 
 // -------------------- Run All (email modal) --------------------
 function showEmailModal(show = true){
-  if(show){ emailModal.classList.add('show'); emailModal.setAttribute('aria-hidden','false'); emailInput.value=''; setTimeout(()=>emailInput.focus(),80); }
-  else { emailModal.classList.remove('show'); emailModal.setAttribute('aria-hidden','true'); }
+  if(show){
+    emailModal.classList.add('show');
+    emailModal.setAttribute('aria-hidden','false');
+    emailInput.value='';
+    setTimeout(()=>emailInput.focus(),80);
+  } else {
+    emailModal.classList.remove('show');
+    emailModal.setAttribute('aria-hidden','true');
+  }
 }
 function validateEmail(email){
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -675,7 +641,9 @@ function validateEmail(email){
 async function runAll(email){
   const emailTrim = (email||'').trim();
   // clear charts
-  latencyChart.data.labels=[]; latencyChart.data.datasets.forEach(ds=>ds.data=[]); latencyChart.update();
+  latencyChart.data.labels=[];
+  latencyChart.data.datasets.forEach(ds=>ds.data=[]);
+  latencyChart.update();
   setStatus('Running all tests');
   disableButtons(true);
 
@@ -724,18 +692,37 @@ function exportCSV(){
     rows.push(['YouTube','Stalls',g_results.youtube.stalls]);
     rows.push(['YouTube','TotalStall_ms',g_results.youtube.totalStall]);
   }
+  if(g_results.speed){
+    rows.push(['Speed','Download_Mbps',g_results.speed.download]);
+    rows.push(['Speed','Upload_Mbps',g_results.speed.upload]);
+    rows.push(['Speed','Ping_ms',g_results.speed.ping]);
+    rows.push(['Speed','Jitter_ms',g_results.speed.jitter]);
+  }
   const csv = rows.map(r=>r.map(c=> typeof c === 'string' && (c.includes(',')||c.includes('"') )? `"${c.replace(/"/g,'""')}"`: c).join(',')).join('\n');
-  const blob = new Blob([csv],{type:'text/csv'}); const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `qoe_${new Date().toISOString().slice(0,19)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  const blob = new Blob([csv],{type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `qoe_${new Date().toISOString().slice(0,19)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function exportJSON(){
-  const blob = new Blob([JSON.stringify(g_results,null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `qoe_${new Date().toISOString().slice(0,19)}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  const blob = new Blob([JSON.stringify(g_results,null,2)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `qoe_${new Date().toISOString().slice(0,19)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function exportPDF(){
-  // use jsPDF (global)
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(14); doc.text('QoE Test Results',14,18);
@@ -756,9 +743,15 @@ function exportPDF(){
     doc.setFontSize(10); doc.text(`Startup: ${Math.round(g_results.youtube.startup)} ms`,16,y); y+=6;
     doc.text(`Stalls: ${g_results.youtube.stalls}`,16,y); y+=10;
   }
+  if(g_results.speed){
+    doc.setFontSize(12); doc.text('Speed:',14,y); y+=6;
+    doc.setFontSize(10); doc.text(`Download: ${(g_results.speed.download||0).toFixed(2)} Mbps`,16,y); y+=6;
+    doc.text(`Upload: ${(g_results.speed.upload||0).toFixed(2)} Mbps`,16,y); y+=6;
+    doc.text(`Ping: ${Math.round(g_results.speed.ping||0)} ms`,16,y); y+=6;
+    doc.text(`Jitter: ${Math.round(g_results.speed.jitter||0)} ms`,16,y); y+=10;
+  }
   doc.save(`qoe_${new Date().toISOString().slice(0,19)}.pdf`);
 }
-
 
 // -------------------- Event wiring --------------------
 runAllBtn.addEventListener('click', ()=>{ showEmailModal(true); });
@@ -781,14 +774,9 @@ exportCSVBtn.addEventListener('click', exportCSV);
 exportJSONBtn.addEventListener('click', exportJSON);
 exportPDFBtn.addEventListener('click', exportPDF);
 
-
-
-// history clears
 document.getElementById('clearHistory').addEventListener('click', ()=>{ g_history=[]; localStorage.setItem('qoe_history','[]'); renderHistory(); });
 
 // initial render
 renderHistory();
 setStatus('Idle');
-
-// expose youtube callback (YT API uses this name)
 window.onYouTubeIframeAPIReady = function(){ onYouTubeIframeAPIReady(); };
