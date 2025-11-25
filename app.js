@@ -1,4 +1,4 @@
-/* app.js — Full feature set (NDT7 for speed test, old YouTube logic preserved) */
+/* app.js — Full feature set (NDT7 for speed test, new YouTube logic preserved) */
 // -------------------- Helpers & DOM --------------------
 const runVoipBtn = document.getElementById('runVoipBtn');
 const runLocalBtn = document.getElementById('runLocalBtn');
@@ -6,12 +6,9 @@ const runYtBtn = document.getElementById('runYtBtn');
 const runAllBtn = document.getElementById('runAllBtn');
 const runSpeedBtn = document.getElementById('runSpeedBtn');
 
-// const exportCSVBtn = document.getElementById('exportCSV');
-// const exportPDFBtn = document.getElementById('exportPDF');
-// const exportJSONBtn = document.getElementById('exportJSON');
-document.getElementById('btnCSV').addEventListener('click', exportCSV);
-document.getElementById('btnJSON').addEventListener('click', exportJSON);
-document.getElementById('btnPDF').addEventListener('click', exportPDF);
+const btnCSV = document.getElementById('btnCSV');
+const btnJSON = document.getElementById('btnJSON');
+const btnPDF = document.getElementById('btnPDF');
 
 const timerSpan = document.getElementById('timer');
 const statusSpan = document.getElementById('status');
@@ -34,6 +31,9 @@ const emailInput = document.getElementById('emailInput');
 const emailCancelBtn = document.getElementById('emailCancelBtn');
 const emailStartBtn = document.getElementById('emailStartBtn');
 
+const YOUTUBE_CONTAINER_ID = 'youtubeContainer';
+const YOUTUBE_PLAYER_ELEMENT_ID = 'youtubePlayer';
+
 // charts
 let latencyChart = null;
 
@@ -44,48 +44,67 @@ let g_history = JSON.parse(localStorage.getItem('qoe_history') || '[]');
 // optional backend URL (set to null to disable)
 const BACKEND_URL = null; // e.g. 'http://localhost:3000/save' or null
 
-
-// Speed chart initializion
+// -------------------- Chart init & helpers --------------------
+// Speed chart initialization (4 datasets: download, upload)
 let speedChart = null;
 function createSpeedChart() {
   const ctx = document.getElementById('speedChart').getContext('2d');
   speedChart = new Chart(ctx, {
     type: 'line',
-    data: { 
-      labels: [], 
-      datasets:[
-        { label:'Download (Mbps)', data:[], borderColor:'#0b69ff', fill:false, tension:0.25 },
-        { label:'Upload (Mbps)', data:[], borderColor:'#00b37e', fill:false, tension:0.25 }
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'Download (Mbps)', data: [], borderColor: '#0b69ff', fill: false, tension: 0.25 },
+        { label: 'Upload (Mbps)', data: [], borderColor: '#00b37e', fill: false, tension: 0.25 },
       ]
     },
-    options: { 
-      animation:false, 
-      responsive:true, 
-      scales:{ y:{ beginAtZero:true } } 
+    options: {
+      animation: false,
+      responsive: true,
+      scales: { y: { beginAtZero: true } }
     }
   });
 }
 createSpeedChart();
 
+function createLatencyChart(){
+  const ctx = document.getElementById('latencyChart').getContext('2d');
+  latencyChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets:[
+      { label:'Latency (ms)', data:[], borderColor:'#0b69ff', tension:0.25, fill:false },
+      { label:'Jitter (ms)', data:[], borderColor:'#00b37e', tension:0.25, fill:false }
+    ]},
+    options: { animation:false, responsive:true, scales:{ y:{ beginAtZero:true } } }
+  });
+}
+createLatencyChart();
 
-// WebRTC globals
-let pcSender = null, pcReceiver = null, dataChannel = null;
-window.__webrtc_rtts = []; // store DC rtt samples ms
-let pingInterval = null;
+function updateCharts(latency, jitter){
+  if(!latencyChart) return;
+  const labels = latencyChart.data.labels;
+  const nowLabel = new Date().toLocaleTimeString();
+  labels.push(nowLabel);
+  latencyChart.data.datasets[0].data.push(Number((latency||0).toFixed(2)));
+  latencyChart.data.datasets[1].data.push(Number((jitter||0).toFixed(2)));
+  if(labels.length>60){ labels.shift(); latencyChart.data.datasets.forEach(d=>d.data.shift());}
+  latencyChart.update();
+}
 
 // -------------------- UI & History --------------------
-function setStatus(s){ statusSpan.textContent = s; }
-function setTimerText(s){ timerSpan.textContent = s; }
+function setStatus(s){ statusSpan && (statusSpan.textContent = s); }
+function setTimerText(s){ timerSpan && (timerSpan.textContent = s); }
 
 function disableButtons(disable = true){
   const buttonArea = document.getElementById('buttonArea');
-  const buttons = buttonArea.querySelectorAll('button');
+  const buttons = buttonArea ? buttonArea.querySelectorAll('button') : [];
   buttons.forEach(btn => btn.disabled = disable);
-  document.getElementById('clearHistory').disabled = disable;
-  // keep modal controls enabled
-  emailCancelBtn.disabled = false;
-  emailStartBtn.disabled = false;
-  emailInput.disabled = false;
+  const clearBtn = document.getElementById('clearHistory');
+  if(clearBtn) clearBtn.disabled = disable;
+  // keep modal controls enabled so user can cancel
+  if(emailCancelBtn) emailCancelBtn.disabled = false;
+  if(emailStartBtn) emailStartBtn.disabled = false;
+  if(emailInput) emailInput.disabled = false;
 }
 
 function saveHistoryEntry(entry){
@@ -101,6 +120,7 @@ function saveHistoryEntry(entry){
 }
 
 function renderHistory(){
+  if(!historyList) return;
   historyList.innerHTML = '';
   if(!g_history.length){ historyList.innerHTML = '<div class="small">No history yet</div>'; return; }
   g_history.forEach((h, idx) => {
@@ -115,25 +135,11 @@ function renderHistory(){
 }
 function showHistoryDetails(h){
   // Expand in results divs
-  voipResultsDiv.innerHTML = renderVoipHTML(h.voip);
-  localResultsDiv.innerHTML = renderLocalHTML(h.local);
-  ytResultsDiv.innerHTML = renderYtHTML(h.youtube);
-  speedResultsDiv.innerHTML = renderSpeedHTML(h.speed);
+  voipResultsDiv && (voipResultsDiv.innerHTML = renderVoipHTML(h.voip));
+  localResultsDiv && (localResultsDiv.innerHTML = renderLocalHTML(h.local));
+  ytResultsDiv && (ytResultsDiv.innerHTML = renderYtHTML(h.youtube));
+  speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(h.speed));
 }
-
-// -------------------- Chart init --------------------
-function createLatencyChart(){
-  const ctx = document.getElementById('latencyChart').getContext('2d');
-  latencyChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels: [], datasets:[
-      { label:'Latency (ms)', data:[], borderColor:'#0b69ff', tension:0.25, fill:false },
-      { label:'Jitter (ms)', data:[], borderColor:'#00b37e', tension:0.25, fill:false }
-    ]},
-    options: { animation:false, responsive:true, scales:{ y:{ beginAtZero:true } } }
-  });
-}
-createLatencyChart();
 
 // -------------------- Render helpers --------------------
 function renderVoipHTML(voip){
@@ -168,7 +174,6 @@ function renderLocalHTML(local){
   `;
 }
 
-
 function renderYtHTML(yt){
   if(!yt) return `<div class="small">No YouTube result</div>`;
 
@@ -194,14 +199,15 @@ function renderSpeedHTML(speed){
           <div class="small">Upload: <span class="value">${(speed.upload||0).toFixed(2)} Mbps</span></div>`;
 }
 
-// <div class="small">Ping: <span class="value">${Math.round(speed.ping||0)} ms</span></div>
-// <div class="small">Jitter: <span class="value">${Math.round(speed.jitter||0)} ms</span></div>
-
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
+let pcSender = null, pcReceiver = null, dataChannel = null;
+window.__webrtc_rtts = []; // store DC rtt samples ms
+let pingInterval = null;
+
 async function runVoipTest(durationSec){
   setStatus('VoIP test running');
   setTimerText(`${durationSec}s`);
-  voipResultsDiv.innerHTML = '<div class="small">Preparing...</div>';
+  voipResultsDiv && (voipResultsDiv.innerHTML = '<div class="small">Preparing...</div>');
   window.__webrtc_rtts = [];
 
   try {
@@ -231,7 +237,7 @@ async function runVoipTest(durationSec){
     pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(()=>{});
 
     pcReceiver.ontrack = e => {
-      if(remoteAudio.srcObject !== e.streams[0]) {
+      if(remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
         remoteAudio.srcObject = e.streams[0];
         remoteAudio.play().catch(()=>{});
       }
@@ -354,7 +360,7 @@ async function runVoipTest(durationSec){
     };
 
     g_results.voip = voip;
-    voipResultsDiv.innerHTML = renderVoipHTML(voip);
+    voipResultsDiv && (voipResultsDiv.innerHTML = renderVoipHTML(voip));
 
     saveHistoryEntry({
       ts: Date.now(),
@@ -376,22 +382,11 @@ async function runVoipTest(durationSec){
     return voip;
 
   } catch(err){
-    voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message||err}</div>`;
-    setStatus('Idle'); 
+    voipResultsDiv && (voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message||err}</div>`);
+    setStatus('Idle');
     setTimerText('0s');
     return null;
   }
-}
-
-
-function updateCharts(latency, jitter){
-  const labels = latencyChart.data.labels;
-  const nowLabel = new Date().toLocaleTimeString();
-  labels.push(nowLabel);
-  latencyChart.data.datasets[0].data.push(Number((latency||0).toFixed(2)));
-  latencyChart.data.datasets[1].data.push(Number((jitter||0).toFixed(2)));
-  if(labels.length>60){ labels.shift(); latencyChart.data.datasets.forEach(d=>d.data.shift());}
-  latencyChart.update();
 }
 
 // -------------------- Local Video Test (Stable + Complete) --------------------
@@ -399,10 +394,10 @@ async function runLocalVideoTest() {
   setStatus('Local video test running');
   const duration = Number(videoDurationInput.value) || 30;
   setTimerText(`${duration}s`);
-  localResultsDiv.innerHTML = '<div class="small">Preparing local video test...</div>';
+  localResultsDiv && (localResultsDiv.innerHTML = '<div class="small">Preparing local video test...</div>');
 
   if (!localVideo || !localVideo.src) {
-    localResultsDiv.innerHTML = '<div class="small">Local video missing (assets/test-video.mp4)</div>';
+    localResultsDiv && (localResultsDiv.innerHTML = '<div class="small">Local video missing (assets/test-video.mp4)</div>');
     return null;
   }
 
@@ -487,7 +482,7 @@ async function runLocalVideoTest() {
 
   const onError = () => {
     cleanup();
-    localResultsDiv.innerHTML = '<div class="small">Local video error</div>';
+    localResultsDiv && (localResultsDiv.innerHTML = '<div class="small">Local video error</div>');
   };
 
   // ---- CLEANUP ----
@@ -534,13 +529,13 @@ async function runLocalVideoTest() {
     freezeCount,
     freezeDuration,
     avgBufferAhead,
-    minBufferAhead,
+    minBufferAhead: isFinite(minBufferAhead) ? minBufferAhead : 0,
     bufferRatio: totalStall / (duration * 1000),
     avgStallDuration: stalls ? totalStall / stalls : 0
   };
 
   g_results.local = result;
-  localResultsDiv.innerHTML = renderLocalHTML(result);
+  localResultsDiv && (localResultsDiv.innerHTML = renderLocalHTML(result));
   saveHistoryEntry({
     ts: Date.now(),
     voip: g_results.voip,
@@ -552,42 +547,28 @@ async function runLocalVideoTest() {
   setTimerText('0s');
   return result;
 }
-
-
 // ================================================
-//               YOUTUBE VIDEO TEST
+//               YOUTUBE VIDEO TEST (FIXED)
 // ================================================
-
 let ytApiReady = false;
 let ytPlayer = null;
 
-const YT_VIDEOS = [
-  'aqz-KE-bpKQ',
-  '5qap5aO4i9A',
-  'J---aiyznGQ',
-  'dQw4w9WgXcQ',
-  '3JZ_D3ELwOQ',
-  '2Vv-BfVoq4g'
-];
+const DEFAULT_YT_VIDEO_ID = "aqz-KE-bpKQ"; // Big Buck Bunny ONLY
 
-const DEFAULT_YT_VIDEO_ID = 'aqz-KE-bpKQ';
-
-// Pick random video
-function pickRandomVideo() {
-  return YT_VIDEOS[Math.floor(Math.random() * YT_VIDEOS.length)];
+// No more random videos
+function pickBigBuckBunny() {
+  return DEFAULT_YT_VIDEO_ID;
 }
 
-// ======================================================
-// Load API (guaranteed success, no more API errors)
-// ======================================================
+// Load YouTube iframe API safely
 function loadYouTubeAPI() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (ytApiReady) return resolve();
 
-    if (!document.getElementById('youtube-api')) {
-      const tag = document.createElement('script');
+    if (!document.getElementById("youtube-api")) {
+      const tag = document.createElement("script");
       tag.src = "https://www.youtube.com/iframe_api";
-      tag.id = 'youtube-api';
+      tag.id = "youtube-api";
       document.head.appendChild(tag);
     }
 
@@ -599,56 +580,75 @@ function loadYouTubeAPI() {
       resolve();
     };
 
-    // HARD fallback after 5s
     setTimeout(() => {
       if (!resolved) {
-        ytApiReady = true; // mark ready
-        resolve();         // do not reject – prevent failures
+        ytApiReady = true;
+        resolve();
       }
     }, 5000);
   });
 }
 
-// ======================================================
-// Create YT Player (with autoplay fix)
-// ======================================================
-function createYTPlayer(videoId) {
-  return new Promise(resolve => {
-    if (ytPlayer) return resolve(ytPlayer);
+// Create player
+function createYTPlayer(videoId = DEFAULT_YT_VIDEO_ID) {
+  return new Promise((resolve) => {
+    if (ytPlayer) {
+      try { ytPlayer.loadVideoById(videoId); } catch (e) {}
+      return resolve(ytPlayer);
+    }
 
-    ytPlayer = new YT.Player('youtubePlayer', {
-      height: '240',
-      width: '400',
+    ytPlayer = new YT.Player(YOUTUBE_PLAYER_ELEMENT_ID, {
+      height: "240",
+      width: "400",
       videoId: videoId,
       playerVars: { autoplay: 1, controls: 1, playsinline: 1, rel: 0, mute: 1 },
       events: {
-        onReady: () => {
-          ytPlayer.unMute?.(); // Try unmute
+        onReady: () => resolve(ytPlayer),
+        onError: (e) => {
+          console.warn("YT error:", e);
           resolve(ytPlayer);
-        }
-      }
+        },
+      },
     });
   });
 }
 
-// ======================================================
-//              YOUTUBE TEST — FULL METRICS
-// ======================================================
+// Fully stop + kill YouTube player (no background audio forever)
+function stopYouTubePlaybackAndHide() {
+  try {
+    if (ytPlayer) {
+      ytPlayer.mute?.();
+      ytPlayer.pauseVideo?.();
+      ytPlayer.stopVideo?.();
+      ytPlayer.destroy?.();
+    }
+  } catch (e) {}
+
+  ytPlayer = null;
+
+  // Remove iframe DOM completely
+  const container = document.getElementById(YOUTUBE_CONTAINER_ID);
+  if (container) {
+    container.innerHTML = "";
+    container.style.display = "none";
+  }
+}
+
+// Run YouTube Test
 async function runYouTubeTest() {
-  setStatus('YouTube test running');
+  setStatus("YouTube test running");
 
   const duration = Number(ytDurationInput.value) || 30;
   setTimerText(`${duration}s`);
-  ytResultsDiv.innerHTML = '<div class="small">Preparing YouTube test...</div>';
+  ytResultsDiv.innerHTML = `<div class="small">Preparing YouTube test...</div>`;
 
-  document.getElementById('youtubeContainer').style.display = 'block';
+  const ytContainer = document.getElementById(YOUTUBE_CONTAINER_ID);
+  if (ytContainer) ytContainer.style.display = "block";
 
   await loadYouTubeAPI();
-  await createYTPlayer(DEFAULT_YT_VIDEO_ID);
+  await createYTPlayer(pickBigBuckBunny()); // Only Big Buck Bunny plays
 
-  return new Promise(resolve => {
-
-    // ---------- METRICS ----------
+  return new Promise((resolve) => {
     let startup = null;
     let stalls = 0;
     let totalStall = 0;
@@ -656,20 +656,15 @@ async function runYouTubeTest() {
     let freezeCount = 0;
     let freezeDuration = 0;
 
-    let lastFrameTime = performance.now();
-    let lastVideoTime = 0;
-
-    let minBufferAhead = Infinity;
-    let maxBufferAhead = 0;
+    let lastVideoTime = -1;
     let bufferSamples = [];
-
-    let playedOnce = false;
     let stallStart = null;
     let freezeStart = null;
 
     const loadTs = performance.now();
+    let playedOnce = false;
 
-    // ---------- YouTube State Tracker ----------
+    // YouTube state listener
     const stateChangeHandler = (e) => {
       const state = e.data;
 
@@ -685,7 +680,6 @@ async function runYouTubeTest() {
           playedOnce = true;
           startup = performance.now() - loadTs;
         }
-
         if (stallStart) {
           totalStall += performance.now() - stallStart;
           stallStart = null;
@@ -693,27 +687,22 @@ async function runYouTubeTest() {
       }
     };
 
-    ytPlayer.addEventListener("onStateChange", stateChangeHandler);
+    ytPlayer.addEventListener?.("onStateChange", stateChangeHandler);
 
-    // ---------------------------------------------------
-    // Continuous polling loop every 200ms for freeze detection + buffer analysis
-    // ---------------------------------------------------
+    // Poll freeze + buffer
     const poll = setInterval(() => {
       try {
         const ct = ytPlayer.getCurrentTime();
-        const bt = ytPlayer.getVideoLoadedFraction() * ytPlayer.getDuration();
-        const bufferedAhead = Math.max(0, bt - ct);
+        const durationTotal = ytPlayer.getDuration();
+        const fraction = ytPlayer.getVideoLoadedFraction();
+        const buff = fraction * durationTotal;
+        const bufferedAhead = Math.max(0, buff - ct);
 
         bufferSamples.push(bufferedAhead);
-        minBufferAhead = Math.min(minBufferAhead, bufferedAhead);
-        maxBufferAhead = Math.max(maxBufferAhead, bufferedAhead);
 
-        // ----- FREEZE DETECTION -----
+        // Freeze detection
         const now = performance.now();
-        const frameGap = now - lastFrameTime;
-
         if (ct === lastVideoTime) {
-          // Frame frozen
           if (!freezeStart) freezeStart = now;
         } else {
           if (freezeStart) {
@@ -722,51 +711,28 @@ async function runYouTubeTest() {
             freezeStart = null;
           }
         }
-
-        lastFrameTime = now;
         lastVideoTime = ct;
-
-      } catch (e) { /* ignore failures */ }
-
+      } catch (e) {}
     }, 200);
 
-    // ---------------------------------------------------
-    // MAIN TIMER LOOP FOR TEST DURATION
-    // ---------------------------------------------------
+    // Timer loop
     let elapsed = 0;
     const timer = setInterval(() => {
-      elapsed += 1;
+      elapsed++;
       setTimerText(`${duration - elapsed}s`);
 
       if (elapsed >= duration) {
         clearInterval(timer);
         clearInterval(poll);
 
-        // finalize stalls
-        if (stallStart) {
-          totalStall += performance.now() - stallStart;
-        }
+        if (stallStart) totalStall += performance.now() - stallStart;
+        if (freezeStart) freezeDuration += performance.now() - freezeStart;
 
-        // finalize freeze
-        if (freezeStart) {
-          freezeDuration += performance.now() - freezeStart;
-        }
+        ytPlayer.removeEventListener?.("onStateChange", stateChangeHandler);
 
-        // remove events
-        try { ytPlayer.removeEventListener("onStateChange", stateChangeHandler); } catch(e){}
+        const avgBufferAhead =
+          bufferSamples.reduce((a, b) => a + b, 0) / bufferSamples.length || 0;
 
-        // calc averages
-        const avgBufferAhead = bufferSamples.length
-          ? bufferSamples.reduce((a,b)=>a+b,0)/bufferSamples.length
-          : 0;
-
-        const bufferRatio = ytPlayer.getDuration()
-          ? (totalStall / (duration * 1000)) * 100
-          : 0;
-
-        const avgStall = stalls > 0 ? (totalStall / stalls) : 0;
-
-        // FINAL RESULT OBJECT
         const res = {
           ts: Date.now(),
           startup: startup || 0,
@@ -775,37 +741,27 @@ async function runYouTubeTest() {
           freezeCount,
           freezeDuration: Math.round(freezeDuration),
           avgBufferAhead,
-          minBufferAhead,
-          bufferRatio,
-          avgStall
         };
 
         g_results.youtube = res;
-
         ytResultsDiv.innerHTML = renderYtHTML(res);
-        saveHistoryEntry({
-          ts: Date.now(),
-          voip: g_results.voip,
-          local: g_results.local,
-          youtube: res
-        });
 
-        setStatus('Idle');
-        setTimerText('0s');
+        // FULL STOP (no audio leak)
+        stopYouTubePlaybackAndHide();
 
+        saveHistoryEntry({ ts: Date.now(), youtube: res });
+
+        setStatus("Idle");
+        setTimerText("0s");
         resolve(res);
       }
-
     }, 1000);
   });
 }
 
-
-
-// NDT7 Speed Test
-
+// -------------------- NDT7 Speed Test --------------------
 async function runNdt7Test(timeoutSec = 30){
-  speedResultsDiv.innerHTML = '<div class="small">Starting NDT7 speed test...</div>';
+  speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small">Starting NDT7 speed test...</div>');
   setStatus('Speed test running');
   setTimerText('0s');
 
@@ -827,25 +783,19 @@ async function runNdt7Test(timeoutSec = 30){
     try {
       const downloadSamples = [];
       const uploadSamples = [];
-      const pingSamples = [];
-      const jitterSamples = [];
+
 
       const test = new window.NDT7({
         onMeasurement: (m)=>{
           const download = m.Download_Mbps || 0;
           const upload = m.Upload_Mbps || 0;
-          const ping = m.Latency_ms || 0;
-          const jitter = m.Jitter_ms || 0;
+
 
           downloadSamples.push(download);
           uploadSamples.push(upload);
-          pingSamples.push(ping);
-          jitterSamples.push(jitter);
 
-          speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
-                                       <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>
-                                       <div class="small">Ping: <span class="value">${Math.round(ping)} ms</span></div>
-                                       <div class="small">Jitter: <span class="value">${Math.round(jitter)} ms</span></div>`;
+          speedResultsDiv && (speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
+                                       <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
 
           // update chart live
           if(speedChart){
@@ -853,8 +803,6 @@ async function runNdt7Test(timeoutSec = 30){
             speedChart.data.labels.push(nowLabel);
             speedChart.data.datasets[0].data.push(download);
             speedChart.data.datasets[1].data.push(upload);
-            speedChart.data.datasets[2].data.push(ping);
-            speedChart.data.datasets[3].data.push(jitter);
             if(speedChart.data.labels.length > 30){
               speedChart.data.labels.shift();
               speedChart.data.datasets.forEach(ds=>ds.data.shift());
@@ -865,19 +813,15 @@ async function runNdt7Test(timeoutSec = 30){
         onComplete: (m)=>{
           const avgDownload = downloadSamples.length ? downloadSamples.reduce((a,b)=>a+b,0)/downloadSamples.length : 0;
           const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
-          const avgPing = pingSamples.length ? pingSamples.reduce((a,b)=>a+b,0)/pingSamples.length : 0;
-          const avgJitter = jitterSamples.length ? jitterSamples.reduce((a,b)=>a+b,0)/jitterSamples.length : 0;
 
           const res = {
             download: avgDownload,
             upload: avgUpload,
-            ping: avgPing,
-            jitter: avgJitter,
             raw: m
           };
 
           g_results.speed = res;
-          speedResultsDiv.innerHTML = renderSpeedHTML(res);
+          speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(res));
           saveHistoryEntry({
             ts: Date.now(),
             email: null,
@@ -906,10 +850,9 @@ async function runNdt7Test(timeoutSec = 30){
 }
 
 // Simulated Speed Test
-
 async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
-  speedResultsDiv.innerHTML = '<div class="small">Simulated speed test running...</div>';
-  setStatus('Simulated speed running');
+  speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small"> MLab Speed test running...</div>');
+  setStatus('Mlab speed running');
 
   const downloadSamples = [];
   const uploadSamples = [];
@@ -928,8 +871,8 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
     downloadSamples.push(download);
     uploadSamples.push(upload);
 
-    speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
-                                 <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`;
+    speedResultsDiv && (speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
+                                 <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
 
     // update chart
     if(speedChart){
@@ -951,13 +894,12 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
   const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
 
   setTimerText('0s'); setStatus('Idle');
-  const res = { download: avgDownload, upload: avgUpload, ping: 0, jitter: 0, simulated: true };
+  const res = { download: avgDownload, upload: avgUpload, simulated: true };
   g_results.speed = res;
   saveHistoryEntry({ ts: Date.now(), email: null, voip: g_results.voip, local: g_results.local, youtube: g_results.youtube, speed: res });
-  speedResultsDiv.innerHTML = renderSpeedHTML(res);
+  speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(res));
   return res;
 }
-
 
 // -------------------- Run Speed Test --------------------
 async function runSpeedTest(){
@@ -972,6 +914,7 @@ async function runSpeedTest(){
 
 // -------------------- Run All (email modal) --------------------
 function showEmailModal(show = true){
+  if(!emailModal) return;
   if(show){
     emailModal.classList.add('show');
     emailModal.setAttribute('aria-hidden','false');
@@ -990,9 +933,11 @@ function validateEmail(email){
 async function runAll(email){
   const emailTrim = (email||'').trim();
   // clear charts
-  latencyChart.data.labels=[];
-  latencyChart.data.datasets.forEach(ds=>ds.data=[]);
-  latencyChart.update();
+  if(latencyChart){
+    latencyChart.data.labels=[];
+    latencyChart.data.datasets.forEach(ds=>ds.data=[]);
+    latencyChart.update();
+  }
   setStatus('Running all tests');
   disableButtons(true);
 
@@ -1027,36 +972,56 @@ function exportCSV() {
 
   const rows = [['Test', 'Metric', 'Value']];
 
+  // VOIP
   if (g_results.voip) {
-    rows.push(['VoIP', 'Latency', `${g_results.voip.latencyMs.toFixed(2)} ms`]);
-    rows.push(['VoIP', 'Jitter', `${g_results.voip.avgJitterMs.toFixed(2)} ms`]);
+    rows.push(['VoIP', 'Latency (ms)', g_results.voip.latencyMs.toFixed(2)]);
+    rows.push(['VoIP', 'Jitter (ms)', g_results.voip.avgJitterMs.toFixed(2)]);
     rows.push(['VoIP', 'Packets Received', g_results.voip.packetsReceived]);
     rows.push(['VoIP', 'Packets Lost', g_results.voip.packetsLost]);
-    rows.push(['VoIP', 'Packet Loss', `${g_results.voip.lossPercent.toFixed(2)} %`]);
+    rows.push(['VoIP', 'Packet Loss (%)', g_results.voip.lossPercent.toFixed(2)]);
     rows.push(['VoIP', 'MOS', g_results.voip.MOS.toFixed(2)]);
   }
+
+  // Local video
   if (g_results.local) {
-    rows.push(['Local', 'Startup', `${Math.round(g_results.local.startup)} ms`]);
+    rows.push(['Local', 'Startup (ms)', Math.round(g_results.local.startup)]);
     rows.push(['Local', 'Stalls', g_results.local.stalls]);
-    rows.push(['Local', 'Total Stall', `${Math.round(g_results.local.totalStall)} ms`]);
-  }
-  if (g_results.youtube) {
-    rows.push(['YouTube', 'Startup', `${Math.round(g_results.youtube.startup)} ms`]);
-    rows.push(['YouTube', 'Stalls', g_results.youtube.stalls]);
-    rows.push(['YouTube', 'Total Stall', `${Math.round(g_results.youtube.totalStall)} ms`]);
-  }
-  if (g_results.speed) {
-    rows.push(['Speed', 'Download', `${(g_results.speed.download||0).toFixed(2)} Mbps`]);
-    rows.push(['Speed', 'Upload', `${(g_results.speed.upload||0).toFixed(2)} Mbps`]);
-    rows.push(['Speed', 'Ping', `${Math.round(g_results.speed.ping||0)} ms`]);
-    rows.push(['Speed', 'Jitter', `${Math.round(g_results.speed.jitter||0)} ms`]);
+    rows.push(['Local', 'Total Stall (ms)', Math.round(g_results.local.totalStall)]);
+    rows.push(['Local', 'Freeze Count', g_results.local.freezeCount || 0]);
+    rows.push(['Local', 'Freeze Duration (ms)', Math.round(g_results.local.freezeDuration || 0)]);
+    rows.push(['Local', 'Avg Buffer Ahead (s)', (g_results.local.avgBufferAhead || 0).toFixed(2)]);
+    rows.push(['Local', 'Min Buffer Ahead (s)', (g_results.local.minBufferAhead || 0).toFixed(2)]);
+    rows.push(['Local', 'Buffer Ratio (%)', (g_results.local.bufferRatio || 0).toFixed(2)]);
+    rows.push(['Local', 'Avg Stall (ms)', Math.round(g_results.local.avgStallDuration || 0)]);
   }
 
-  const csv = rows.map(r => r.map(c =>
-    typeof c === 'string' && (c.includes(',') || c.includes('"'))
-      ? `"${c.replace(/"/g,'""')}"`
-      : c
-  ).join(',')).join('\n');
+  // YouTube
+  if (g_results.youtube) {
+    rows.push(['YouTube', 'Startup (ms)', Math.round(g_results.youtube.startup)]);
+    rows.push(['YouTube', 'Stalls', g_results.youtube.stalls]);
+    rows.push(['YouTube', 'Total Stall (ms)', Math.round(g_results.youtube.totalStall)]);
+    rows.push(['YouTube', 'Freeze Count', g_results.youtube.freezeCount]);
+    rows.push(['YouTube', 'Freeze Duration (ms)', Math.round(g_results.youtube.freezeDuration)]);
+    rows.push(['YouTube', 'Avg Buffer Ahead (s)', g_results.youtube.avgBufferAhead.toFixed(2)]);
+    rows.push(['YouTube', 'Min Buffer Ahead (s)', g_results.youtube.minBufferAhead.toFixed(2)]);
+    rows.push(['YouTube', 'Max Buffer Ahead (s)', g_results.youtube.maxBufferAhead.toFixed(2)]);
+    rows.push(['YouTube', 'Buffer Ratio (%)', g_results.youtube.bufferRatio.toFixed(2)]);
+    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStall)]);
+  }
+
+  // Speed
+  if (g_results.speed) {
+    rows.push(['Speed', 'Download (Mbps)', (g_results.speed.download || 0).toFixed(2)]);
+    rows.push(['Speed', 'Upload (Mbps)', (g_results.speed.upload || 0).toFixed(2)]);
+  }
+
+  const csv = rows
+    .map(r => r.map(c =>
+      typeof c === 'string' && (c.includes(',') || c.includes('"'))
+        ? `"${c.replace(/"/g, '""')}"`
+        : c
+    ).join(','))
+    .join('\n');
 
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -1072,26 +1037,24 @@ function exportCSV() {
 function exportJSON() {
   if (!g_results) { alert("No test results available!"); return; }
 
-  // attach units in JSON
+  // attach units in JSON copy
   const resultsWithUnits = JSON.parse(JSON.stringify(g_results));
   if (resultsWithUnits.voip) {
-    resultsWithUnits.voip.latencyMs += ' ms';
-    resultsWithUnits.voip.avgJitterMs += ' ms';
-    resultsWithUnits.voip.lossPercent += ' %';
+    resultsWithUnits.voip.latencyMs = `${Number(resultsWithUnits.voip.latencyMs).toFixed(2)} ms`;
+    resultsWithUnits.voip.avgJitterMs = `${Number(resultsWithUnits.voip.avgJitterMs).toFixed(2)} ms`;
+    resultsWithUnits.voip.lossPercent = `${Number(resultsWithUnits.voip.lossPercent).toFixed(2)} %`;
   }
   if (resultsWithUnits.local) {
-    resultsWithUnits.local.startup += ' ms';
-    resultsWithUnits.local.totalStall += ' ms';
+    resultsWithUnits.local.startup = `${Math.round(resultsWithUnits.local.startup)} ms`;
+    resultsWithUnits.local.totalStall = `${Math.round(resultsWithUnits.local.totalStall)} ms`;
   }
   if (resultsWithUnits.youtube) {
-    resultsWithUnits.youtube.startup += ' ms';
-    resultsWithUnits.youtube.totalStall += ' ms';
+    resultsWithUnits.youtube.startup = `${Math.round(resultsWithUnits.youtube.startup)} ms`;
+    resultsWithUnits.youtube.totalStall = `${Math.round(resultsWithUnits.youtube.totalStall)} ms`;
   }
   if (resultsWithUnits.speed) {
-    resultsWithUnits.speed.download += ' Mbps';
-    resultsWithUnits.speed.upload += ' Mbps';
-    resultsWithUnits.speed.ping += ' ms';
-    resultsWithUnits.speed.jitter += ' ms';
+    resultsWithUnits.speed.download = `${Number(resultsWithUnits.speed.download).toFixed(2)} Mbps`;
+    resultsWithUnits.speed.upload = `${Number(resultsWithUnits.speed.upload).toFixed(2)} Mbps`;
   }
 
   const blob = new Blob([JSON.stringify(resultsWithUnits, null, 2)], { type: 'application/json' });
@@ -1134,36 +1097,35 @@ function exportPDF() {
   addSection('VoIP', g_results.voip, { latencyMs:'ms', avgJitterMs:'ms', lossPercent:'%' });
   addSection('Local Video', g_results.local, { startup:'ms', totalStall:'ms' });
   addSection('YouTube', g_results.youtube, { startup:'ms', totalStall:'ms' });
-  addSection('Speed', g_results.speed, { download:'Mbps', upload:'Mbps', ping:'ms', jitter:'ms' });
+  addSection('Speed', g_results.speed, { download:'Mbps', upload:'Mbps'});
 
   doc.save(`qoe_${new Date().toISOString().replace(/:/g,'-')}.pdf`);
 }
 
-
 // -------------------- Event wiring --------------------
-runAllBtn.addEventListener('click', ()=>{ showEmailModal(true); });
-emailCancelBtn.addEventListener('click', ()=>{ showEmailModal(false); });
-emailInput.addEventListener('keydown', (ev)=>{ if(ev.key === 'Enter'){ emailStartBtn.click(); } });
-emailStartBtn.addEventListener('click', ()=>{
-  const emailVal = emailInput.value || '';
-  if(!validateEmail(emailVal)){ alert('Please enter a valid email address (e.g. you@example.com).'); emailInput.focus(); return; }
+runAllBtn && runAllBtn.addEventListener('click', ()=>{ showEmailModal(true); });
+emailCancelBtn && emailCancelBtn.addEventListener('click', ()=>{ showEmailModal(false); });
+emailInput && emailInput.addEventListener('keydown', (ev)=>{ if(ev.key === 'Enter'){ emailStartBtn && emailStartBtn.click(); } });
+emailStartBtn && emailStartBtn.addEventListener('click', ()=>{
+  const emailVal = emailInput ? (emailInput.value || '') : '';
+  if(!validateEmail(emailVal)){ alert('Please enter a valid email address (e.g. you@example.com).'); emailInput && emailInput.focus(); return; }
   showEmailModal(false);
   runAll(emailVal);
 });
 
-runVoipBtn.addEventListener('click', ()=>{ disableButtons(true); runVoipTest(Number(voipDurationInput.value)||30).finally(()=>disableButtons(false)); });
-runLocalBtn.addEventListener('click', ()=>{ disableButtons(true); runLocalVideoTest().finally(()=>disableButtons(false)); });
-runYtBtn.addEventListener('click', ()=>{ disableButtons(true); runYouTubeTest().finally(()=>disableButtons(false)); });
+runVoipBtn && runVoipBtn.addEventListener('click', ()=>{ disableButtons(true); runVoipTest(Number(voipDurationInput.value)||30).finally(()=>disableButtons(false)); });
+runLocalBtn && runLocalBtn.addEventListener('click', ()=>{ disableButtons(true); runLocalVideoTest().finally(()=>disableButtons(false)); });
+runYtBtn && runYtBtn.addEventListener('click', ()=>{ disableButtons(true); runYouTubeTest().finally(()=>disableButtons(false)); });
+runSpeedBtn && runSpeedBtn.addEventListener('click', ()=>{ disableButtons(true); runSpeedTest().finally(()=>disableButtons(false)); });
 
-runSpeedBtn.addEventListener('click', ()=>{ disableButtons(true); runSpeedTest().finally(()=>disableButtons(false)); });
+btnCSV && btnCSV.addEventListener('click', exportCSV);
+btnJSON && btnJSON.addEventListener('click', exportJSON);
+btnPDF && btnPDF.addEventListener('click', exportPDF);
 
-exportCSVBtn.addEventListener('click', exportCSV);
-exportJSONBtn.addEventListener('click', exportJSON);
-exportPDFBtn.addEventListener('click', exportPDF);
+document.getElementById('clearHistory')?.addEventListener('click', ()=>{ g_history=[]; localStorage.setItem('qoe_history','[]'); renderHistory(); });
 
-document.getElementById('clearHistory').addEventListener('click', ()=>{ g_history=[]; localStorage.setItem('qoe_history','[]'); renderHistory(); });
-
-// initial render
+// initial render / UI init
 renderHistory();
 setStatus('Idle');
-window.onYouTubeIframeAPIReady = function(){ onYouTubeIframeAPIReady(); };
+
+// NOTE: Do not override window.onYouTubeIframeAPIReady elsewhere — loadYouTubeAPI() will set it when needed.
