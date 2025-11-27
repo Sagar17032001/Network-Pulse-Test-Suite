@@ -1023,15 +1023,15 @@ async function runSpeedTest() {
 }
 
 //---------------------Send Data to Server-----------------------
-async function sendResultsToServer(emailVal) {
-  if (!emailVal || !validateEmail(emailVal)) {
+async function sendResultsToServer(email) {
+  if (!email || !validateEmail(email)) {
     alert("Please enter a valid email to send results.");
     return;
   }
 
   // Assuming g_results looks like: { voip: {...}, local: {...}, youtube: {...}, speed: {...} }
   const payload = {
-    emailVal: emailVal.trim(),
+    email: email.trim(),
     ...g_results,   // spread g_results into the payload
     ts: new Date().toISOString()
   };
