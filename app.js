@@ -1121,6 +1121,8 @@ runSpeedBtn && runSpeedBtn.addEventListener('click', ()=>{ disableButtons(true);
 btnCSV && btnCSV.addEventListener('click', exportCSV);
 btnJSON && btnJSON.addEventListener('click', exportJSON);
 btnPDF && btnPDF.addEventListener('click', exportPDF);
+document.getElementById("btnCSV")?.addEventListener("click", exportCSV);
+
 
 document.getElementById('clearHistory')?.addEventListener('click', ()=>{ g_history=[]; localStorage.setItem('qoe_history','[]'); renderHistory(); });
 
