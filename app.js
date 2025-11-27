@@ -1008,9 +1008,8 @@ function exportCSV() {
     rows.push(['YouTube', 'Freeze Duration (ms)', Math.round(g_results.youtube.freezeDuration || 0)]);
     rows.push(['YouTube', 'Avg Buffer Ahead (s)', safeFixed(g_results.youtube.avgBufferAhead)]);
     rows.push(['YouTube', 'Min Buffer Ahead (s)', safeFixed(g_results.youtube.minBufferAhead)]);
-    rows.push(['YouTube', 'Max Buffer Ahead (s)', safeFixed(g_results.youtube.maxBufferAhead)]);
     rows.push(['YouTube', 'Buffer Ratio (%)', safeFixed(g_results.youtube.bufferRatio)]);
-    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStall || 0)]);
+    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStallDuration || 0)]);
   }
 
   // Speed
