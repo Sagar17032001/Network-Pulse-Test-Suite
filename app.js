@@ -1022,6 +1022,42 @@ async function runSpeedTest() {
   }
 }
 
+//---------------------Send Data to Server-----------------------
+async function sendResultsToServer(email) {
+  if (!email || !validateEmail(email)) {
+    alert("Please enter a valid email to send results.");
+    return;
+  }
+
+  // Assuming g_results looks like: { voip: {...}, local: {...}, youtube: {...}, speed: {...} }
+  const payload = {
+    email: email.trim(),
+    ...g_results,   // spread g_results into the payload
+    ts: new Date().toISOString()
+  };
+
+  console.log("Sending payload:", payload);
+
+  try {
+    const response = await fetch('https://qoe-backend-zr50.onrender.com/api/users/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) throw new Error(`Server responded ${response.status}`);
+
+    const data = await response.json();
+    console.log("Results sent successfully:", data);
+    alert("Test results sent successfully!");
+  } catch (err) {
+    console.error("Failed to send results:", err);
+    alert("Failed to send results. Check console.");
+  }
+}
+
+
+
 // -------------------- Run All (email modal) --------------------
 function showEmailModal(show = true) {
   if (!emailModal) return;
@@ -1067,6 +1103,12 @@ async function runAll(email) {
     };
     saveHistoryEntry(fullEntry);
     setStatus('Completed all tests');
+
+    // ✅ Send results to your Node.js API
+    if (emailTrim) {
+      await sendResultsToServer(emailTrim);
+    }
+
   } catch (e) {
     console.error('Run All error', e);
     setStatus('Error during run');
