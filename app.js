@@ -967,6 +967,10 @@ async function runAll(email){
 }
 
 // -------------------- Utilities: export CSV/JSON/PDF with units --------------------
+function safeFixed(value, decimals = 2, fallback = '-') {
+  return (typeof value === 'number' && !isNaN(value)) ? value.toFixed(decimals) : fallback;
+}
+
 function exportCSV() {
   if (!g_results) { alert("No test results available!"); return; }
 
@@ -974,64 +978,56 @@ function exportCSV() {
 
   // VOIP
   if (g_results.voip) {
-    rows.push(['VoIP', 'Latency (ms)', g_results.voip.latencyMs.toFixed(2)]);
-    rows.push(['VoIP', 'Jitter (ms)', g_results.voip.avgJitterMs.toFixed(2)]);
-    rows.push(['VoIP', 'Packets Received', g_results.voip.packetsReceived]);
-    rows.push(['VoIP', 'Packets Lost', g_results.voip.packetsLost]);
-    rows.push(['VoIP', 'Packet Loss (%)', g_results.voip.lossPercent.toFixed(2)]);
-    rows.push(['VoIP', 'MOS', g_results.voip.MOS.toFixed(2)]);
+    rows.push(['VoIP', 'Latency (ms)', safeFixed(g_results.voip.latencyMs)]);
+    rows.push(['VoIP', 'Jitter (ms)', safeFixed(g_results.voip.avgJitterMs)]);
+    rows.push(['VoIP', 'Packets Received', g_results.voip.packetsReceived ?? '-']);
+    rows.push(['VoIP', 'Packets Lost', g_results.voip.packetsLost ?? '-']);
+    rows.push(['VoIP', 'Packet Loss (%)', safeFixed(g_results.voip.lossPercent)]);
+    rows.push(['VoIP', 'MOS', safeFixed(g_results.voip.MOS)]);
   }
 
   // Local video
   if (g_results.local) {
-    rows.push(['Local', 'Startup (ms)', Math.round(g_results.local.startup)]);
-    rows.push(['Local', 'Stalls', g_results.local.stalls]);
-    rows.push(['Local', 'Total Stall (ms)', Math.round(g_results.local.totalStall)]);
-    rows.push(['Local', 'Freeze Count', g_results.local.freezeCount || 0]);
+    rows.push(['Local', 'Startup (ms)', Math.round(g_results.local.startup || 0)]);
+    rows.push(['Local', 'Stalls', g_results.local.stalls ?? 0]);
+    rows.push(['Local', 'Total Stall (ms)', Math.round(g_results.local.totalStall || 0)]);
+    rows.push(['Local', 'Freeze Count', g_results.local.freezeCount ?? 0]);
     rows.push(['Local', 'Freeze Duration (ms)', Math.round(g_results.local.freezeDuration || 0)]);
-    rows.push(['Local', 'Avg Buffer Ahead (s)', (g_results.local.avgBufferAhead || 0).toFixed(2)]);
-    rows.push(['Local', 'Min Buffer Ahead (s)', (g_results.local.minBufferAhead || 0).toFixed(2)]);
-    rows.push(['Local', 'Buffer Ratio (%)', (g_results.local.bufferRatio || 0).toFixed(2)]);
+    rows.push(['Local', 'Avg Buffer Ahead (s)', safeFixed(g_results.local.avgBufferAhead)]);
+    rows.push(['Local', 'Min Buffer Ahead (s)', safeFixed(g_results.local.minBufferAhead)]);
+    rows.push(['Local', 'Buffer Ratio (%)', safeFixed(g_results.local.bufferRatio)]);
     rows.push(['Local', 'Avg Stall (ms)', Math.round(g_results.local.avgStallDuration || 0)]);
   }
 
   // YouTube
   if (g_results.youtube) {
-    rows.push(['YouTube', 'Startup (ms)', Math.round(g_results.youtube.startup)]);
-    rows.push(['YouTube', 'Stalls', g_results.youtube.stalls]);
-    rows.push(['YouTube', 'Total Stall (ms)', Math.round(g_results.youtube.totalStall)]);
-    rows.push(['YouTube', 'Freeze Count', g_results.youtube.freezeCount]);
-    rows.push(['YouTube', 'Freeze Duration (ms)', Math.round(g_results.youtube.freezeDuration)]);
-    rows.push(['YouTube', 'Avg Buffer Ahead (s)', g_results.youtube.avgBufferAhead.toFixed(2)]);
-    rows.push(['YouTube', 'Min Buffer Ahead (s)', g_results.youtube.minBufferAhead.toFixed(2)]);
-    rows.push(['YouTube', 'Max Buffer Ahead (s)', g_results.youtube.maxBufferAhead.toFixed(2)]);
-    rows.push(['YouTube', 'Buffer Ratio (%)', g_results.youtube.bufferRatio.toFixed(2)]);
-    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStall)]);
+    rows.push(['YouTube', 'Startup (ms)', Math.round(g_results.youtube.startup || 0)]);
+    rows.push(['YouTube', 'Stalls', g_results.youtube.stalls ?? 0]);
+    rows.push(['YouTube', 'Total Stall (ms)', Math.round(g_results.youtube.totalStall || 0)]);
+    rows.push(['YouTube', 'Freeze Count', g_results.youtube.freezeCount ?? 0]);
+    rows.push(['YouTube', 'Freeze Duration (ms)', Math.round(g_results.youtube.freezeDuration || 0)]);
+    rows.push(['YouTube', 'Avg Buffer Ahead (s)', safeFixed(g_results.youtube.avgBufferAhead)]);
+    rows.push(['YouTube', 'Min Buffer Ahead (s)', safeFixed(g_results.youtube.minBufferAhead)]);
+    rows.push(['YouTube', 'Max Buffer Ahead (s)', safeFixed(g_results.youtube.maxBufferAhead)]);
+    rows.push(['YouTube', 'Buffer Ratio (%)', safeFixed(g_results.youtube.bufferRatio)]);
+    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStall || 0)]);
   }
 
   // Speed
   if (g_results.speed) {
-    rows.push(['Speed', 'Download (Mbps)', (g_results.speed.download || 0).toFixed(2)]);
-    rows.push(['Speed', 'Upload (Mbps)', (g_results.speed.upload || 0).toFixed(2)]);
+    rows.push(['Speed', 'Download (Mbps)', safeFixed(g_results.speed.download)]);
+    rows.push(['Speed', 'Upload (Mbps)', safeFixed(g_results.speed.upload)]);
   }
 
-  const csv = rows
-    .map(r => r.map(c =>
-      typeof c === 'string' && (c.includes(',') || c.includes('"'))
-        ? `"${c.replace(/"/g, '""')}"`
-        : c
-    ).join(','))
-    .join('\n');
-
+  const csv = rows.map(r => r.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
+
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qoe_${new Date().toISOString().replace(/:/g,'-')}.csv`;
-  document.body.appendChild(a);
+  a.download = `qoe_${new Date().toISOString().replace(/:/g, '-')}.csv`;
   a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 100);
+  URL.revokeObjectURL(url);
 }
 
 function exportJSON() {
