@@ -67,83 +67,181 @@ function createSpeedChart() {
 }
 createSpeedChart();
 
-function createLatencyChart(){
+function createLatencyChart() {
   const ctx = document.getElementById('latencyChart').getContext('2d');
   latencyChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: [], datasets:[
-      { label:'Latency (ms)', data:[], borderColor:'#0b69ff', tension:0.25, fill:false },
-      { label:'Jitter (ms)', data:[], borderColor:'#00b37e', tension:0.25, fill:false }
-    ]},
-    options: { animation:false, responsive:true, scales:{ y:{ beginAtZero:true } } }
+    data: {
+      labels: [], datasets: [
+        { label: 'Latency (ms)', data: [], borderColor: '#0b69ff', tension: 0.25, fill: false },
+        { label: 'Jitter (ms)', data: [], borderColor: '#00b37e', tension: 0.25, fill: false }
+      ]
+    },
+    options: { animation: false, responsive: true, scales: { y: { beginAtZero: true } } }
   });
 }
 createLatencyChart();
 
-function updateCharts(latency, jitter){
-  if(!latencyChart) return;
+function updateCharts(latency, jitter) {
+  if (!latencyChart) return;
   const labels = latencyChart.data.labels;
   const nowLabel = new Date().toLocaleTimeString();
   labels.push(nowLabel);
-  latencyChart.data.datasets[0].data.push(Number((latency||0).toFixed(2)));
-  latencyChart.data.datasets[1].data.push(Number((jitter||0).toFixed(2)));
-  if(labels.length>60){ labels.shift(); latencyChart.data.datasets.forEach(d=>d.data.shift());}
+  latencyChart.data.datasets[0].data.push(Number((latency || 0).toFixed(2)));
+  latencyChart.data.datasets[1].data.push(Number((jitter || 0).toFixed(2)));
+  if (labels.length > 60) { labels.shift(); latencyChart.data.datasets.forEach(d => d.data.shift()); }
   latencyChart.update();
 }
 
 // -------------------- UI & History --------------------
-function setStatus(s){ statusSpan && (statusSpan.textContent = s); }
-function setTimerText(s){ timerSpan && (timerSpan.textContent = s); }
+function setStatus(s) { statusSpan && (statusSpan.textContent = s); }
+function setTimerText(s) { timerSpan && (timerSpan.textContent = s); }
 
-function disableButtons(disable = true){
+function disableButtons(disable = true) {
   const buttonArea = document.getElementById('buttonArea');
   const buttons = buttonArea ? buttonArea.querySelectorAll('button') : [];
   buttons.forEach(btn => btn.disabled = disable);
   const clearBtn = document.getElementById('clearHistory');
-  if(clearBtn) clearBtn.disabled = disable;
+  if (clearBtn) clearBtn.disabled = disable;
   // keep modal controls enabled so user can cancel
-  if(emailCancelBtn) emailCancelBtn.disabled = false;
-  if(emailStartBtn) emailStartBtn.disabled = false;
-  if(emailInput) emailInput.disabled = false;
+  if (emailCancelBtn) emailCancelBtn.disabled = false;
+  if (emailStartBtn) emailStartBtn.disabled = false;
+  if (emailInput) emailInput.disabled = false;
 }
 
-function saveHistoryEntry(entry){
-  g_history.unshift(entry);
-  if(g_history.length > 200) g_history.pop();
-  localStorage.setItem('qoe_history', JSON.stringify(g_history));
-  renderHistory();
-  // optionally send to backend
-  if(BACKEND_URL){
-    fetch(BACKEND_URL, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)})
-    .catch(()=>{ /* ignore */ });
+let currentTestType = null;
+
+// ------------------- Set Status -------------------
+function setStatus(s) {
+  statusSpan && (statusSpan.textContent = s);
+
+  // Start detection: "<Test Name> test running"
+  const matchStart = s.match(/^(.+?)\s+test\s+running/i);
+  if (matchStart) {
+    const name = matchStart[1].trim().toLowerCase();
+    const typeMap = {
+      'voip': 'voip',
+      'youtube': 'youtube',
+      'speed': 'speed',
+      'local video': 'local'
+    };
+    currentTestType = typeMap[name];
+    if (!currentTestType) return;
+
+    // Start a new entry for this test
+    saveHistoryEntry({ type: currentTestType }, true);
+    return;
+  }
+
+  // End detection
+  if (s.toLowerCase() === 'idle' && currentTestType) {
+    finishCurrentTest(currentTestType);
+    currentTestType = null;
   }
 }
 
-function renderHistory(){
-  if(!historyList) return;
+// ------------------- Save / Update History -------------------
+function saveHistoryEntry(entry, isStart = false) {
+  const type = entry.type || currentTestType;
+  if (!type) return;
+
+  if (isStart) {
+    g_history.unshift({ type, startTs: Date.now(), endTs: null });
+  } else {
+    // Update existing entry without endTs
+    const idx = g_history.findIndex(h => h.type === type && !h.endTs);
+    if (idx >= 0) {
+      g_history[idx].endTs = Date.now();
+    }
+  }
+
+  if (g_history.length > 200) g_history.pop();
+  localStorage.setItem('qoe_history', JSON.stringify(g_history));
+  renderHistory();
+}
+
+// ------------------- Finish Current Test -------------------
+function finishCurrentTest(type) {
+  saveHistoryEntry({}, false);
+}
+
+// ------------------- Render History List -------------------
+function renderHistory() {
+  if (!historyList) return;
   historyList.innerHTML = '';
-  if(!g_history.length){ historyList.innerHTML = '<div class="small">No history yet</div>'; return; }
-  g_history.forEach((h, idx) => {
+
+  if (!g_history.length) {
+    const noData = document.createElement('div');
+    noData.textContent = 'No history yet';
+    noData.style.fontWeight = '600';
+    noData.style.color = '#666';
+    noData.style.padding = '10px';
+    historyList.appendChild(noData);
+    return;
+  }
+
+  g_history.forEach(h => {
+    const start = h.startTs ? new Date(h.startTs).toLocaleString() : '—';
+    const end = h.endTs ? new Date(h.endTs).toLocaleString() : '—';
+    const testName = h.type?.toUpperCase();
+
     const d = document.createElement('div');
-    d.style.padding = '8px';
-    d.style.borderBottom = '1px solid #eef6ff';
-    d.innerHTML = `<div style="font-weight:700">${new Date(h.ts).toLocaleString()}</div>
-      <div class="small">Email: ${h.email || '—'} • VoIP MOS: ${h.voip?.MOS ?? '—'} • Speed: ${h.speed ? (Math.round(h.speed.download*100)/100)+' Mbps' : '—'}</div>`;
-    d.addEventListener('click', ()=>{ showHistoryDetails(h); });
+    d.style.padding = '12px 16px';
+    d.style.marginBottom = '8px';
+    d.style.border = '1px solid #e0e0e0';
+    d.style.borderRadius = '6px';
+    d.style.background = '#ffffff';
+    d.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+    d.style.cursor = 'pointer';
+    d.style.fontFamily = 'Arial, sans-serif';
+
+    // Bold test name, timestamps normal color
+    d.innerHTML = `<span style="font-weight:700; color:#333;">${testName} TEST</span> • 
+                   <span style="color:#555;">Start: ${start} | End: ${end}</span>`;
+
     historyList.appendChild(d);
   });
 }
-function showHistoryDetails(h){
-  // Expand in results divs
-  voipResultsDiv && (voipResultsDiv.innerHTML = renderVoipHTML(h.voip));
-  localResultsDiv && (localResultsDiv.innerHTML = renderLocalHTML(h.local));
-  ytResultsDiv && (ytResultsDiv.innerHTML = renderYtHTML(h.youtube));
-  speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(h.speed));
+
+
+
+// ------------------- Show Specific Test Details -------------------
+function showHistoryDetails(h) {
+  const start = h.startTs ? new Date(h.startTs).toLocaleString() : '—';
+  const end = h.endTs ? new Date(h.endTs).toLocaleString() : '—';
+
+  const headerHTML = `<div style="font-weight:700; margin-bottom:4px;">
+      Test Timeline: Start - ${start} | End - ${end}
+    </div>`;
+
+  // Clear all result divs first
+  voipResultsDiv && (voipResultsDiv.innerHTML = '');
+  localResultsDiv && (localResultsDiv.innerHTML = '');
+  ytResultsDiv && (ytResultsDiv.innerHTML = '');
+  speedResultsDiv && (speedResultsDiv.innerHTML = '');
+
+  // Show only relevant test results
+  switch(h.type) {
+    case 'voip': voipResultsDiv && (voipResultsDiv.innerHTML = headerHTML + renderVoipHTML(h.voip)); break;
+    case 'local': localResultsDiv && (localResultsDiv.innerHTML = headerHTML + renderLocalHTML(h.local)); break;
+    case 'youtube': ytResultsDiv && (ytResultsDiv.innerHTML = headerHTML + renderYtHTML(h.youtube)); break;
+    case 'speed': speedResultsDiv && (speedResultsDiv.innerHTML = headerHTML + renderSpeedHTML(h.speed)); break;
+    default:
+      // fallback → show all
+      voipResultsDiv && (voipResultsDiv.innerHTML = headerHTML + renderVoipHTML(h.voip));
+      localResultsDiv && (localResultsDiv.innerHTML = headerHTML + renderLocalHTML(h.local));
+      ytResultsDiv && (ytResultsDiv.innerHTML = headerHTML + renderYtHTML(h.youtube));
+      speedResultsDiv && (speedResultsDiv.innerHTML = headerHTML + renderSpeedHTML(h.speed));
+      break;
+  }
 }
 
+
+
+
 // -------------------- Render helpers --------------------
-function renderVoipHTML(voip){
-  if(!voip) return `<div class="small">No VoIP result</div>`;
+function renderVoipHTML(voip) {
+  if (!voip) return `<div class="small">No VoIP result</div>`;
   return `<div class="small">Latency: <span class="value">${voip.latencyMs.toFixed(2)} ms</span></div>
     <div class="small">Jitter: <span class="value">${voip.avgJitterMs.toFixed(2)} ms</span></div>
     <div class="small">Packets Received: <span class="value">${voip.packetsReceived}</span></div>
@@ -152,7 +250,7 @@ function renderVoipHTML(voip){
     <div class="small">MOS (est): <span class="value">${voip.MOS.toFixed(2)}</span></div>`;
 }
 
-function renderLocalHTML(local){
+function renderLocalHTML(local) {
   if (!local) {
     return `<div class="small">No local video result</div>`;
   }
@@ -174,8 +272,8 @@ function renderLocalHTML(local){
   `;
 }
 
-function renderYtHTML(yt){
-  if(!yt) return `<div class="small">No YouTube result</div>`;
+function renderYtHTML(yt) {
+  if (!yt) return `<div class="small">No YouTube result</div>`;
 
   return `
     <div class="small">Startup: <span class="value">${Math.round(yt.startup)} ms</span></div>
@@ -193,10 +291,10 @@ function renderYtHTML(yt){
   `;
 }
 
-function renderSpeedHTML(speed){
-  if(!speed) return `<div class="small">No speed result</div>`;
-  return `<div class="small">Download: <span class="value">${(speed.download||0).toFixed(2)} Mbps</span></div>
-          <div class="small">Upload: <span class="value">${(speed.upload||0).toFixed(2)} Mbps</span></div>`;
+function renderSpeedHTML(speed) {
+  if (!speed) return `<div class="small">No speed result</div>`;
+  return `<div class="small">Download: <span class="value">${(speed.download || 0).toFixed(2)} Mbps</span></div>
+          <div class="small">Upload: <span class="value">${(speed.upload || 0).toFixed(2)} Mbps</span></div>`;
 }
 
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
@@ -204,7 +302,7 @@ let pcSender = null, pcReceiver = null, dataChannel = null;
 window.__webrtc_rtts = []; // store DC rtt samples ms
 let pingInterval = null;
 
-async function runVoipTest(durationSec){
+async function runVoipTest(durationSec) {
   setStatus('VoIP test running');
   setTimerText(`${durationSec}s`);
   voipResultsDiv && (voipResultsDiv.innerHTML = '<div class="small">Preparing...</div>');
@@ -233,13 +331,13 @@ async function runVoipTest(durationSec){
 
     stream.getTracks().forEach(t => pcSender.addTrack(t, stream));
 
-    pcSender.onicecandidate = e => e.candidate && pcReceiver.addIceCandidate(e.candidate).catch(()=>{});
-    pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(()=>{});
+    pcSender.onicecandidate = e => e.candidate && pcReceiver.addIceCandidate(e.candidate).catch(() => { });
+    pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(() => { });
 
     pcReceiver.ontrack = e => {
-      if(remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
+      if (remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
         remoteAudio.srcObject = e.streams[0];
-        remoteAudio.play().catch(()=>{});
+        remoteAudio.play().catch(() => { });
       }
     };
 
@@ -249,7 +347,7 @@ async function runVoipTest(durationSec){
     dataChannel = pcSender.createDataChannel('ping');
     pcReceiver.ondatachannel = ev => {
       const ch = ev.channel;
-      ch.onmessage = m => { try { ch.send(m.data); } catch(e){} };
+      ch.onmessage = m => { try { ch.send(m.data); } catch (e) { } };
     };
 
     // --------------------------------------------------------
@@ -268,23 +366,23 @@ async function runVoipTest(durationSec){
     // --------------------------------------------------------
     const rtts = [];
     dataChannel.onmessage = ev => {
-      try{
+      try {
         const pkt = JSON.parse(ev.data);
-        if(pkt && pkt.sentTs){
+        if (pkt && pkt.sentTs) {
           const rtt = performance.now() - pkt.sentTs;
           rtts.push(rtt);
           window.__webrtc_rtts.push(rtt);
           updateCharts(rtt, 0);
         }
-      }catch(e){}
+      } catch (e) { }
     };
 
-    pingInterval = setInterval(()=>{
-      if(dataChannel && dataChannel.readyState === 'open'){
-        const pkt = { sentTs: performance.now(), jitter:0 };
-        try{ dataChannel.send(JSON.stringify(pkt)); }catch(e){}
+    pingInterval = setInterval(() => {
+      if (dataChannel && dataChannel.readyState === 'open') {
+        const pkt = { sentTs: performance.now(), jitter: 0 };
+        try { dataChannel.send(JSON.stringify(pkt)); } catch (e) { }
       }
-    },1000);
+    }, 1000);
 
     // --------------------------------------------------------
     // 6. RTP Stats collection
@@ -292,61 +390,61 @@ async function runVoipTest(durationSec){
     const inboundHistory = [];
     const outboundHistory = [];
 
-    for(let i=durationSec;i>=1;i--){
+    for (let i = durationSec; i >= 1; i--) {
       setTimerText(`${i}s`);
 
-      try{
+      try {
         const stats = await pcReceiver.getStats();
-        stats.forEach(r=>{
-          if(r.type === 'inbound-rtp' && (r.kind==='audio' || r.mediaType==='audio')){
+        stats.forEach(r => {
+          if (r.type === 'inbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) {
             inboundHistory.push({
-              packetsReceived: r.packetsReceived||0,
-              packetsLost: r.packetsLost||0,
-              jitter: r.jitter||0
+              packetsReceived: r.packetsReceived || 0,
+              packetsLost: r.packetsLost || 0,
+              jitter: r.jitter || 0
             });
           }
         });
-      }catch(e){}
+      } catch (e) { }
 
-      try{
+      try {
         const stats2 = await pcSender.getStats();
-        stats2.forEach(r=>{
-          if(r.type === 'outbound-rtp' && (r.kind==='audio' || r.mediaType==='audio')){
-            outboundHistory.push({ rtt: r.roundTripTime||0 });
+        stats2.forEach(r => {
+          if (r.type === 'outbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) {
+            outboundHistory.push({ rtt: r.roundTripTime || 0 });
           }
         });
-      }catch(e){}
+      } catch (e) { }
 
-      await new Promise(r=>setTimeout(r,1000));
+      await new Promise(r => setTimeout(r, 1000));
     }
 
     clearInterval(pingInterval);
-    await new Promise(r=>setTimeout(r,300));
+    await new Promise(r => setTimeout(r, 300));
 
     // --------------------------------------------------------
     // 7. Aggregation (UNCHANGED)
     // --------------------------------------------------------
-    const lastInbound = inboundHistory.length ? inboundHistory[inboundHistory.length-1] : null;
+    const lastInbound = inboundHistory.length ? inboundHistory[inboundHistory.length - 1] : null;
     const packetsReceived = lastInbound ? lastInbound.packetsReceived : 0;
     const packetsLost = lastInbound ? lastInbound.packetsLost : 0;
 
-    const jitterMsArr = inboundHistory.map(s => (s.jitter||0)*1000);
-    const avgJitterMs = jitterMsArr.length ? jitterMsArr.reduce((a,b)=>a+b,0)/jitterMsArr.length : 0;
+    const jitterMsArr = inboundHistory.map(s => (s.jitter || 0) * 1000);
+    const avgJitterMs = jitterMsArr.length ? jitterMsArr.reduce((a, b) => a + b, 0) / jitterMsArr.length : 0;
 
     const dcRtts = window.__webrtc_rtts.slice();
-    const avgDcRtt = dcRtts.length ? dcRtts.reduce((a,b)=>a+b,0)/dcRtts.length : 0;
+    const avgDcRtt = dcRtts.length ? dcRtts.reduce((a, b) => a + b, 0) / dcRtts.length : 0;
 
-    const outboundRttMsArr = outboundHistory.map(s => (s.rtt||0)*1000);
-    const avgOutboundRttMs = outboundRttMsArr.length ? outboundRttMsArr.reduce((a,b)=>a+b,0)/outboundRttMsArr.length : 0;
+    const outboundRttMsArr = outboundHistory.map(s => (s.rtt || 0) * 1000);
+    const avgOutboundRttMs = outboundRttMsArr.length ? outboundRttMsArr.reduce((a, b) => a + b, 0) / outboundRttMsArr.length : 0;
 
     const latencyMs = avgDcRtt || avgOutboundRttMs;
 
     const totalPackets = packetsReceived + packetsLost;
-    const lossPercent = totalPackets ? (packetsLost/totalPackets)*100 : 0;
+    const lossPercent = totalPackets ? (packetsLost / totalPackets) * 100 : 0;
 
-    let R = 94.2 - (latencyMs*0.03 + avgJitterMs*0.10 + lossPercent*2.5);
-    R = Math.max(0, Math.min(100,R));
-    const MOS = 1 + 0.035*R + 0.000007*R*(R-60)*(100-R);
+    let R = 94.2 - (latencyMs * 0.03 + avgJitterMs * 0.10 + lossPercent * 2.5);
+    R = Math.max(0, Math.min(100, R));
+    const MOS = 1 + 0.035 * R + 0.000007 * R * (R - 60) * (100 - R);
 
     const voip = {
       ts: Date.now(),
@@ -372,8 +470,8 @@ async function runVoipTest(durationSec){
     // --------------------------------------------------------
     // 8. Cleanup
     // --------------------------------------------------------
-    try{ pcSender.close(); pcReceiver.close(); }catch(e){}
-    try{ oscillator.stop(); audioCtx.close(); }catch(e){}
+    try { pcSender.close(); pcReceiver.close(); } catch (e) { }
+    try { oscillator.stop(); audioCtx.close(); } catch (e) { }
     pcSender = pcReceiver = dataChannel = null;
     window.__webrtc_rtts = [];
     setStatus('Idle');
@@ -381,15 +479,15 @@ async function runVoipTest(durationSec){
 
     return voip;
 
-  } catch(err){
-    voipResultsDiv && (voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message||err}</div>`);
+  } catch (err) {
+    voipResultsDiv && (voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message || err}</div>`);
     setStatus('Idle');
     setTimerText('0s');
     return null;
   }
 }
 
-// -------------------- Local Video Test (Stable + Complete) --------------------
+// -------------------- Local Video Test (Optimized YouTube-style) --------------------
 async function runLocalVideoTest() {
   setStatus('Local video test running');
   const duration = Number(videoDurationInput.value) || 30;
@@ -401,38 +499,34 @@ async function runLocalVideoTest() {
     return null;
   }
 
-  // Reset
+  // Reset video
   localVideo.pause();
   localVideo.currentTime = 0;
   localVideo.style.display = 'block';
 
-  let startReq = performance.now();
+  const startReq = performance.now();
   let startup = null;
 
   let stalls = 0;
   let totalStall = 0;
   let stallStart = null;
 
-  // Freeze detection
-  let lastTime = 0;
-  let freezeStart = null;
   let freezeCount = 0;
   let freezeDuration = 0;
+  let freezeStart = null;
+  let lastTime = 0;
 
-  // Buffer monitoring
   let bufferAheadSamples = [];
   let minBufferAhead = Infinity;
 
-  // ---- LISTENERS ----
+  // --- Event Handlers ---
   const onWaiting = () => {
+    if (!stallStart) stallStart = performance.now();
     stalls++;
-    stallStart = performance.now();
   };
 
   const onPlaying = () => {
-    if (startup === null) {
-      startup = performance.now() - startReq;
-    }
+    if (startup === null) startup = performance.now() - startReq;
     if (stallStart) {
       totalStall += performance.now() - stallStart;
       stallStart = null;
@@ -447,7 +541,7 @@ async function runLocalVideoTest() {
     const currentTime = localVideo.currentTime;
 
     // --- Freeze detection (video not moving) ---
-    if (Math.abs(currentTime - lastTime) < 0.001) {
+    if (Math.abs(currentTime - lastTime) < 0.05) { // YouTube-style threshold
       if (!freezeStart) {
         freezeStart = performance.now();
         freezeCount++;
@@ -458,25 +552,22 @@ async function runLocalVideoTest() {
     }
     lastTime = currentTime;
 
-    // --- Buffer health ---
+    // --- Buffer monitoring ---
     const buf = localVideo.buffered;
     let bufferAhead = 0;
-    if (buf.length > 0) {
-      for (let i = 0; i < buf.length; i++) {
-        if (buf.start(i) <= currentTime && buf.end(i) >= currentTime) {
-          bufferAhead = buf.end(i) - currentTime;
-          break;
-        }
+    for (let i = 0; i < buf.length; i++) {
+      if (buf.start(i) <= currentTime && buf.end(i) >= currentTime) {
+        bufferAhead = buf.end(i) - currentTime;
+        break;
       }
     }
-
     bufferAheadSamples.push(bufferAhead);
     minBufferAhead = Math.min(minBufferAhead, bufferAhead);
 
-    // auto stall if buffer low
+    // --- Auto-stall if buffer too low ---
     if (bufferAhead < 0.2 && !stallStart) {
-      stalls++;
       stallStart = performance.now();
+      stalls++;
     }
   };
 
@@ -485,45 +576,45 @@ async function runLocalVideoTest() {
     localResultsDiv && (localResultsDiv.innerHTML = '<div class="small">Local video error</div>');
   };
 
-  // ---- CLEANUP ----
+  // --- Cleanup ---
   function cleanup() {
     localVideo.removeEventListener('waiting', onWaiting);
     localVideo.removeEventListener('playing', onPlaying);
     localVideo.removeEventListener('timeupdate', onTimeUpdate);
     localVideo.removeEventListener('error', onError);
 
-    try { localVideo.pause(); } catch (e) {}
+    try { localVideo.pause(); } catch (e) { }
     localVideo.style.display = 'none';
   }
 
-  // Attach listeners
+  // --- Attach listeners ---
   localVideo.addEventListener('waiting', onWaiting);
   localVideo.addEventListener('playing', onPlaying);
   localVideo.addEventListener('timeupdate', onTimeUpdate);
   localVideo.addEventListener('error', onError);
 
-  try { await localVideo.play(); } catch (e) {}
+  try { await localVideo.play(); } catch (e) { }
 
-  // --- TEST TIMER ---
+  // --- Test timer ---
   for (let i = duration; i >= 1; i--) {
     setTimerText(`${i}s`);
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  // Final stall + freeze
+  // --- Final accounting ---
   if (stallStart) totalStall += performance.now() - stallStart;
   if (freezeStart) freezeDuration += performance.now() - freezeStart;
+  if (startup === null) startup = performance.now() - startReq; // fallback
 
   cleanup();
 
-  // Final metrics
   const avgBufferAhead = bufferAheadSamples.length
     ? bufferAheadSamples.reduce((a, b) => a + b, 0) / bufferAheadSamples.length
     : 0;
 
   const result = {
     ts: Date.now(),
-    startup: startup || 0,
+    startup,
     stalls,
     totalStall,
     freezeCount,
@@ -547,6 +638,7 @@ async function runLocalVideoTest() {
   setTimerText('0s');
   return result;
 }
+
 // ================================================
 //               YOUTUBE VIDEO TEST (FIXED)
 // ================================================
@@ -593,7 +685,7 @@ function loadYouTubeAPI() {
 function createYTPlayer(videoId = DEFAULT_YT_VIDEO_ID) {
   return new Promise((resolve) => {
     if (ytPlayer) {
-      try { ytPlayer.loadVideoById(videoId); } catch (e) {}
+      try { ytPlayer.loadVideoById(videoId); } catch (e) { }
       return resolve(ytPlayer);
     }
 
@@ -622,7 +714,7 @@ function stopYouTubePlaybackAndHide() {
       ytPlayer.stopVideo?.();
       ytPlayer.destroy?.();
     }
-  } catch (e) {}
+  } catch (e) { }
 
   ytPlayer = null;
 
@@ -634,7 +726,9 @@ function stopYouTubePlaybackAndHide() {
   }
 }
 
-// Run YouTube Test
+/// ==========================
+// Run YouTube Test (Improved)
+// ==========================
 async function runYouTubeTest() {
   setStatus("YouTube test running");
 
@@ -652,7 +746,6 @@ async function runYouTubeTest() {
     let startup = null;
     let stalls = 0;
     let totalStall = 0;
-
     let freezeCount = 0;
     let freezeDuration = 0;
 
@@ -661,10 +754,10 @@ async function runYouTubeTest() {
     let stallStart = null;
     let freezeStart = null;
 
-    const loadTs = performance.now();
     let playedOnce = false;
+    const startTime = performance.now();
 
-    // YouTube state listener
+    // ---- Player state handler ----
     const stateChangeHandler = (e) => {
       const state = e.data;
 
@@ -678,7 +771,7 @@ async function runYouTubeTest() {
       if (state === YT.PlayerState.PLAYING) {
         if (!playedOnce) {
           playedOnce = true;
-          startup = performance.now() - loadTs;
+          startup = performance.now() - startTime;
         }
         if (stallStart) {
           totalStall += performance.now() - stallStart;
@@ -689,33 +782,32 @@ async function runYouTubeTest() {
 
     ytPlayer.addEventListener?.("onStateChange", stateChangeHandler);
 
-    // Poll freeze + buffer
+    // ---- Continuous poll for freeze & buffer metrics ----
     const poll = setInterval(() => {
       try {
         const ct = ytPlayer.getCurrentTime();
         const durationTotal = ytPlayer.getDuration();
         const fraction = ytPlayer.getVideoLoadedFraction();
-        const buff = fraction * durationTotal;
-        const bufferedAhead = Math.max(0, buff - ct);
 
+        const bufferedAhead = Math.max(0, fraction * durationTotal - ct);
         bufferSamples.push(bufferedAhead);
 
         // Freeze detection
         const now = performance.now();
-        if (ct === lastVideoTime) {
-          if (!freezeStart) freezeStart = now;
-        } else {
-          if (freezeStart) {
+        if (Math.abs(ct - lastVideoTime) < 0.001) {
+          if (!freezeStart) {
+            freezeStart = now;
             freezeCount++;
-            freezeDuration += now - freezeStart;
-            freezeStart = null;
           }
+        } else if (freezeStart) {
+          freezeDuration += now - freezeStart;
+          freezeStart = null;
         }
         lastVideoTime = ct;
       } catch (e) {}
     }, 200);
 
-    // Timer loop
+    // ---- Main timer ----
     let elapsed = 0;
     const timer = setInterval(() => {
       elapsed++;
@@ -730,29 +822,47 @@ async function runYouTubeTest() {
 
         ytPlayer.removeEventListener?.("onStateChange", stateChangeHandler);
 
+        // Buffer stats
         const avgBufferAhead =
-          bufferSamples.reduce((a, b) => a + b, 0) / bufferSamples.length || 0;
+          bufferSamples.length > 0
+            ? bufferSamples.reduce((a, b) => a + b, 0) / bufferSamples.length
+            : 0;
+        const minBufferAhead =
+          bufferSamples.length > 0 ? Math.min(...bufferSamples) : 0;
+        const maxBufferAhead =
+          bufferSamples.length > 0 ? Math.max(...bufferSamples) : 0;
+
+        // ---- Correct bufferRatio ----
+        const bufferRatio = Number(
+          ((totalStall / (duration * 1000)) * 100).toFixed(2)
+        );
 
         const res = {
           ts: Date.now(),
-          startup: startup || 0,
+          startup: Math.round(startup || 0),
           stalls,
           totalStall: Math.round(totalStall),
           freezeCount,
           freezeDuration: Math.round(freezeDuration),
-          avgBufferAhead,
+          avgBufferAhead: Number(avgBufferAhead.toFixed(2)),
+          minBufferAhead: Number(minBufferAhead.toFixed(2)),
+          maxBufferAhead: Number(maxBufferAhead.toFixed(2)),
+          bufferRatio,
         };
 
         g_results.youtube = res;
         ytResultsDiv.innerHTML = renderYtHTML(res);
 
-        // FULL STOP (no audio leak)
-        stopYouTubePlaybackAndHide();
+        stopYouTubePlaybackAndHide(); // FULL audio/video shutdown
 
-        saveHistoryEntry({ ts: Date.now(), youtube: res });
+        saveHistoryEntry({
+          ts: Date.now(),
+          youtube: res,
+        });
 
         setStatus("Idle");
         setTimerText("0s");
+
         resolve(res);
       }
     }, 1000);
@@ -760,33 +870,33 @@ async function runYouTubeTest() {
 }
 
 // -------------------- NDT7 Speed Test --------------------
-async function runNdt7Test(timeoutSec = 30){
+async function runNdt7Test(timeoutSec = 30) {
   speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small">Starting NDT7 speed test...</div>');
   setStatus('Speed test running');
   setTimerText('0s');
 
-  if(!('NDT7' in window)) {
-    await new Promise((resolve, reject)=>{
+  if (!('NDT7' in window)) {
+    await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = 'https://unpkg.com/@m-lab/ndt7/dist/ndt7.min.js';
       s.onload = resolve;
       s.onerror = reject;
       document.head.appendChild(s);
-    }).catch(()=>{ console.warn('NDT7 library failed to load'); });
+    }).catch(() => { console.warn('NDT7 library failed to load'); });
   }
 
-  if(!('NDT7' in window)){
+  if (!('NDT7' in window)) {
     return simulatedSpeedTest(timeoutSec);
   }
 
-  return new Promise(async (resolve, reject)=>{
+  return new Promise(async (resolve, reject) => {
     try {
       const downloadSamples = [];
       const uploadSamples = [];
 
 
       const test = new window.NDT7({
-        onMeasurement: (m)=>{
+        onMeasurement: (m) => {
           const download = m.Download_Mbps || 0;
           const upload = m.Upload_Mbps || 0;
 
@@ -798,21 +908,21 @@ async function runNdt7Test(timeoutSec = 30){
                                        <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
 
           // update chart live
-          if(speedChart){
+          if (speedChart) {
             const nowLabel = new Date().toLocaleTimeString();
             speedChart.data.labels.push(nowLabel);
             speedChart.data.datasets[0].data.push(download);
             speedChart.data.datasets[1].data.push(upload);
-            if(speedChart.data.labels.length > 30){
+            if (speedChart.data.labels.length > 30) {
               speedChart.data.labels.shift();
-              speedChart.data.datasets.forEach(ds=>ds.data.shift());
+              speedChart.data.datasets.forEach(ds => ds.data.shift());
             }
             speedChart.update();
           }
         },
-        onComplete: (m)=>{
-          const avgDownload = downloadSamples.length ? downloadSamples.reduce((a,b)=>a+b,0)/downloadSamples.length : 0;
-          const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
+        onComplete: (m) => {
+          const avgDownload = downloadSamples.length ? downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length : 0;
+          const avgUpload = uploadSamples.length ? uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length : 0;
 
           const res = {
             download: avgDownload,
@@ -835,14 +945,14 @@ async function runNdt7Test(timeoutSec = 30){
           setTimerText('0s');
           resolve(res);
         },
-        onError: (err)=>{
+        onError: (err) => {
           console.warn('NDT7 error', err);
           simulatedSpeedTest(timeoutSec).then(resolve);
         },
         timeout: timeoutSec * 1000
       });
       test.start();
-    } catch(e){
+    } catch (e) {
       console.warn('NDT7 start failed', e);
       simulatedSpeedTest(timeoutSec).then(resolve);
     }
@@ -850,7 +960,7 @@ async function runNdt7Test(timeoutSec = 30){
 }
 
 // Simulated Speed Test
-async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
+async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30) {
   speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small"> MLab Speed test running...</div>');
   setStatus('Mlab speed running');
 
@@ -858,16 +968,16 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
   const uploadSamples = [];
 
   // clear chart
-  if(speedChart){
+  if (speedChart) {
     speedChart.data.labels = [];
     speedChart.data.datasets.forEach(ds => ds.data = []);
     speedChart.update();
   }
 
-  for(let i=seconds;i>=1;i--){
+  for (let i = seconds; i >= 1; i--) {
     setTimerText(`${i}s`);
-    const download = 20 + Math.random()*80;
-    const upload = 5 + Math.random()*50;
+    const download = 20 + Math.random() * 80;
+    const upload = 5 + Math.random() * 50;
     downloadSamples.push(download);
     uploadSamples.push(upload);
 
@@ -875,23 +985,23 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
                                  <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
 
     // update chart
-    if(speedChart){
+    if (speedChart) {
       const nowLabel = new Date().toLocaleTimeString();
       speedChart.data.labels.push(nowLabel);
       speedChart.data.datasets[0].data.push(download);
       speedChart.data.datasets[1].data.push(upload);
-      if(speedChart.data.labels.length > 30){
+      if (speedChart.data.labels.length > 30) {
         speedChart.data.labels.shift();
-        speedChart.data.datasets.forEach(ds=>ds.data.shift());
+        speedChart.data.datasets.forEach(ds => ds.data.shift());
       }
       speedChart.update();
     }
 
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r => setTimeout(r, 1000));
   }
 
-  const avgDownload = downloadSamples.length ? downloadSamples.reduce((a,b)=>a+b,0)/downloadSamples.length : 0;
-  const avgUpload = uploadSamples.length ? uploadSamples.reduce((a,b)=>a+b,0)/uploadSamples.length : 0;
+  const avgDownload = downloadSamples.length ? downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length : 0;
+  const avgUpload = uploadSamples.length ? uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length : 0;
 
   setTimerText('0s'); setStatus('Idle');
   const res = { download: avgDownload, upload: avgUpload, simulated: true };
@@ -902,47 +1012,47 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30){
 }
 
 // -------------------- Run Speed Test --------------------
-async function runSpeedTest(){
+async function runSpeedTest() {
   try {
-    const res = await runNdt7Test(Number(speedDurationInput.value)||30);
+    const res = await runNdt7Test(Number(speedDurationInput.value) || 30);
     return res;
-  } catch(e){
+  } catch (e) {
     console.warn('Speed test failed', e);
-    return simulatedSpeedTest(Number(speedDurationInput.value)||30);
+    return simulatedSpeedTest(Number(speedDurationInput.value) || 30);
   }
 }
 
 // -------------------- Run All (email modal) --------------------
-function showEmailModal(show = true){
-  if(!emailModal) return;
-  if(show){
+function showEmailModal(show = true) {
+  if (!emailModal) return;
+  if (show) {
     emailModal.classList.add('show');
-    emailModal.setAttribute('aria-hidden','false');
-    emailInput.value='';
-    setTimeout(()=>emailInput.focus(),80);
+    emailModal.setAttribute('aria-hidden', 'false');
+    emailInput.value = '';
+    setTimeout(() => emailInput.focus(), 80);
   } else {
     emailModal.classList.remove('show');
-    emailModal.setAttribute('aria-hidden','true');
+    emailModal.setAttribute('aria-hidden', 'true');
   }
 }
-function validateEmail(email){
+function validateEmail(email) {
   const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return re.test(String(email || '').trim());
 }
 
-async function runAll(email){
-  const emailTrim = (email||'').trim();
+async function runAll(email) {
+  const emailTrim = (email || '').trim();
   // clear charts
-  if(latencyChart){
-    latencyChart.data.labels=[];
-    latencyChart.data.datasets.forEach(ds=>ds.data=[]);
+  if (latencyChart) {
+    latencyChart.data.labels = [];
+    latencyChart.data.datasets.forEach(ds => ds.data = []);
     latencyChart.update();
   }
   setStatus('Running all tests');
   disableButtons(true);
 
   try {
-    await runVoipTest(Number(voipDurationInput.value)||30);
+    await runVoipTest(Number(voipDurationInput.value) || 30);
     await runLocalVideoTest();
     await runYouTubeTest();
     await runSpeedTest();
@@ -957,7 +1067,7 @@ async function runAll(email){
     };
     saveHistoryEntry(fullEntry);
     setStatus('Completed all tests');
-  } catch(e){
+  } catch (e) {
     console.error('Run All error', e);
     setStatus('Error during run');
   } finally {
@@ -1009,7 +1119,7 @@ function exportCSV() {
     rows.push(['YouTube', 'Avg Buffer Ahead (s)', safeFixed(g_results.youtube.avgBufferAhead)]);
     rows.push(['YouTube', 'Min Buffer Ahead (s)', safeFixed(g_results.youtube.minBufferAhead)]);
     rows.push(['YouTube', 'Buffer Ratio (%)', safeFixed(g_results.youtube.bufferRatio)]);
-    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStallDuration || 0)]);
+    rows.push(['YouTube', 'Avg Stall (ms)', Math.round(g_results.youtube.avgStall || 0)]);
   }
 
   // Speed
@@ -1056,7 +1166,7 @@ function exportJSON() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `qoe_${new Date().toISOString().replace(/:/g,'-')}.json`;
+  a.download = `qoe_${new Date().toISOString().replace(/:/g, '-')}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1076,42 +1186,42 @@ function exportPDF() {
   doc.text('QoE Test Results', 14, 18);
   let y = 28;
 
-  function addSection(title, metrics, unitsMap = {}){
+  function addSection(title, metrics, unitsMap = {}) {
     if (!metrics) return;
     doc.setFontSize(12); doc.text(title, 14, y); y += 6;
     doc.setFontSize(10);
     for (const [key, value] of Object.entries(metrics)) {
       let val = value;
-      if(unitsMap[key]) val = `${val} ${unitsMap[key]}`;
+      if (unitsMap[key]) val = `${val} ${unitsMap[key]}`;
       doc.text(`${key}: ${val}`, 16, y); y += 6;
       if (y > 280) { doc.addPage(); y = 20; }
     }
     y += 4;
   }
 
-  addSection('VoIP', g_results.voip, { latencyMs:'ms', avgJitterMs:'ms', lossPercent:'%' });
-  addSection('Local Video', g_results.local, { startup:'ms', totalStall:'ms' });
-  addSection('YouTube', g_results.youtube, { startup:'ms', totalStall:'ms' });
-  addSection('Speed', g_results.speed, { download:'Mbps', upload:'Mbps'});
+  addSection('VoIP', g_results.voip, { latencyMs: 'ms', avgJitterMs: 'ms', lossPercent: '%' });
+  addSection('Local Video', g_results.local, { startup: 'ms', totalStall: 'ms' });
+  addSection('YouTube', g_results.youtube, { startup: 'ms', totalStall: 'ms' });
+  addSection('Speed', g_results.speed, { download: 'Mbps', upload: 'Mbps' });
 
-  doc.save(`qoe_${new Date().toISOString().replace(/:/g,'-')}.pdf`);
+  doc.save(`qoe_${new Date().toISOString().replace(/:/g, '-')}.pdf`);
 }
 
 // -------------------- Event wiring --------------------
-runAllBtn && runAllBtn.addEventListener('click', ()=>{ showEmailModal(true); });
-emailCancelBtn && emailCancelBtn.addEventListener('click', ()=>{ showEmailModal(false); });
-emailInput && emailInput.addEventListener('keydown', (ev)=>{ if(ev.key === 'Enter'){ emailStartBtn && emailStartBtn.click(); } });
-emailStartBtn && emailStartBtn.addEventListener('click', ()=>{
+runAllBtn && runAllBtn.addEventListener('click', () => { showEmailModal(true); });
+emailCancelBtn && emailCancelBtn.addEventListener('click', () => { showEmailModal(false); });
+emailInput && emailInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { emailStartBtn && emailStartBtn.click(); } });
+emailStartBtn && emailStartBtn.addEventListener('click', () => {
   const emailVal = emailInput ? (emailInput.value || '') : '';
-  if(!validateEmail(emailVal)){ alert('Please enter a valid email address (e.g. you@example.com).'); emailInput && emailInput.focus(); return; }
+  if (!validateEmail(emailVal)) { alert('Please enter a valid email address (e.g. you@example.com).'); emailInput && emailInput.focus(); return; }
   showEmailModal(false);
   runAll(emailVal);
 });
 
-runVoipBtn && runVoipBtn.addEventListener('click', ()=>{ disableButtons(true); runVoipTest(Number(voipDurationInput.value)||30).finally(()=>disableButtons(false)); });
-runLocalBtn && runLocalBtn.addEventListener('click', ()=>{ disableButtons(true); runLocalVideoTest().finally(()=>disableButtons(false)); });
-runYtBtn && runYtBtn.addEventListener('click', ()=>{ disableButtons(true); runYouTubeTest().finally(()=>disableButtons(false)); });
-runSpeedBtn && runSpeedBtn.addEventListener('click', ()=>{ disableButtons(true); runSpeedTest().finally(()=>disableButtons(false)); });
+runVoipBtn && runVoipBtn.addEventListener('click', () => { disableButtons(true); runVoipTest(Number(voipDurationInput.value) || 30).finally(() => disableButtons(false)); });
+runLocalBtn && runLocalBtn.addEventListener('click', () => { disableButtons(true); runLocalVideoTest().finally(() => disableButtons(false)); });
+runYtBtn && runYtBtn.addEventListener('click', () => { disableButtons(true); runYouTubeTest().finally(() => disableButtons(false)); });
+runSpeedBtn && runSpeedBtn.addEventListener('click', () => { disableButtons(true); runSpeedTest().finally(() => disableButtons(false)); });
 
 btnCSV && btnCSV.addEventListener('click', exportCSV);
 btnJSON && btnJSON.addEventListener('click', exportJSON);
@@ -1119,7 +1229,7 @@ btnPDF && btnPDF.addEventListener('click', exportPDF);
 document.getElementById("btnCSV")?.addEventListener("click", exportCSV);
 
 
-document.getElementById('clearHistory')?.addEventListener('click', ()=>{ g_history=[]; localStorage.setItem('qoe_history','[]'); renderHistory(); });
+document.getElementById('clearHistory')?.addEventListener('click', () => { g_history = []; localStorage.setItem('qoe_history', '[]'); renderHistory(); });
 
 // initial render / UI init
 renderHistory();
