@@ -1,12 +1,6 @@
 /* app.js — Full feature set (NDT7 for speed test, new YouTube logic preserved) */
 // -------------------- Helpers & DOM --------------------
 // Limit rendering quality for better mobile performance
-const ctx = document.getElementById("localChart").getContext("2d");
-
-// Set fixed width/height instead of letting CSS scale it
-ctx.canvas.width = ctx.canvas.offsetWidth;
-ctx.canvas.height = ctx.canvas.offsetHeight;
-
 const runVoipBtn = document.getElementById('runVoipBtn');
 const runLocalBtn = document.getElementById('runLocalBtn');
 const runYtBtn = document.getElementById('runYtBtn');
