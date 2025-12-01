@@ -1,6 +1,6 @@
 /* app.js — Full feature set (NDT7 for speed test, new YouTube logic preserved) */
 // -------------------- Helpers & DOM --------------------
-// Limit rendering quality for better mobile performance
+
 const runVoipBtn = document.getElementById('runVoipBtn');
 const runLocalBtn = document.getElementById('runLocalBtn');
 const runYtBtn = document.getElementById('runYtBtn');
@@ -423,11 +423,16 @@ async function runVoipTest(durationSec) {
   window.__webrtc_rtts = [];
 
   try {
-
     // --------------------------------------------------------
     // 1. SYNTHETIC AUDIO TRACK (replaces microphone entirely)
     // --------------------------------------------------------
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Resume audio context on iOS/Chrome
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
     const oscillator = audioCtx.createOscillator();
     oscillator.frequency.value = 0;  // silent
 
@@ -448,9 +453,13 @@ async function runVoipTest(durationSec) {
     pcSender.onicecandidate = e => e.candidate && pcReceiver.addIceCandidate(e.candidate).catch(() => { });
     pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(() => { });
 
-    pcReceiver.ontrack = e => {
+    pcReceiver.ontrack = async e => {
       if (remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
         remoteAudio.srcObject = e.streams[0];
+
+        // Resume audio context in case iOS blocked it
+        try { await audioCtx.resume(); } catch(e){}
+
         remoteAudio.play().catch(() => { });
       }
     };
@@ -536,7 +545,7 @@ async function runVoipTest(durationSec) {
     await new Promise(r => setTimeout(r, 300));
 
     // --------------------------------------------------------
-    // 7. Aggregation (UNCHANGED)
+    // 7. Aggregation
     // --------------------------------------------------------
     const lastInbound = inboundHistory.length ? inboundHistory[inboundHistory.length - 1] : null;
     const packetsReceived = lastInbound ? lastInbound.packetsReceived : 0;
