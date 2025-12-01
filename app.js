@@ -34,6 +34,119 @@ const emailStartBtn = document.getElementById('emailStartBtn');
 const YOUTUBE_CONTAINER_ID = 'youtubeContainer';
 const YOUTUBE_PLAYER_ELEMENT_ID = 'youtubePlayer';
 
+
+
+
+
+let localChart = null;
+let ytChart = null;
+
+function initLocalChart() {
+  const el = document.getElementById("localChart");
+  if (!el) return console.warn("localChart canvas missing");
+
+  localChart = new Chart(el.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Buffer Ahead (sec)',
+          data: [],
+          borderColor: '#007bff',
+          fill: false,
+          tension: 0.25
+        },
+        {
+          label: 'Stalls Count',
+          data: [],
+          borderColor: '#ff3b30',
+          fill: false,
+          tension: 0.25,
+          yAxisID: "stallAxis"
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: 'Buffer (s)' } },
+        stallAxis: {
+          type: "linear",
+          position: "right",
+          beginAtZero: true,
+          title: { display: true, text: "Stalls" },
+        }
+      }
+    }
+  });
+}
+
+function initYTChart() {
+  const el = document.getElementById("ytChart");
+  if (!el) return console.warn("ytChart canvas missing");
+
+  ytChart = new Chart(el.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Buffer Ahead (sec)',
+          data: [],
+          borderColor: '#007bff',
+          fill: false,
+          tension: 0.25
+        },
+        {
+          label: 'Stalls Count',
+          data: [],
+          borderColor: '#ff3b30',
+          fill: false,
+          tension: 0.25,
+          yAxisID: "stallAxis"
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: 'Buffer (s)' } },
+        stallAxis: {
+          type: "linear",
+          position: "right",
+          beginAtZero: true,
+          title: { display: true, text: "Stalls" },
+        }
+      }
+    }
+  });
+}
+
+// Call once on page load
+initLocalChart();
+initYTChart();
+
+
+
+function liveUpdateLocalChart(timeSec, bufferAheadSec, stallCount) {
+  if (!localChart) return;
+  localChart.data.labels.push(timeSec);
+  localChart.data.datasets[0].data.push(bufferAheadSec);
+  localChart.data.datasets[1].data.push(stallCount);
+  localChart.update();
+}
+
+function liveUpdateYTChart(timeSec, bufferAheadSec, stallCount) {
+  if (!ytChart) return;
+  ytChart.data.labels.push(timeSec);
+  ytChart.data.datasets[0].data.push(bufferAheadSec);
+  ytChart.data.datasets[1].data.push(stallCount);
+  ytChart.update();
+}
+
+
+
 // charts
 let latencyChart = null;
 
@@ -499,7 +612,6 @@ async function runLocalVideoTest() {
     return null;
   }
 
-  // Reset video
   localVideo.pause();
   localVideo.currentTime = 0;
   localVideo.style.display = 'block';
@@ -518,8 +630,8 @@ async function runLocalVideoTest() {
 
   let bufferAheadSamples = [];
   let minBufferAhead = Infinity;
+  let elapsedSeconds = 0; // 🔹 added to track time
 
-  // --- Event Handlers ---
   const onWaiting = () => {
     if (!stallStart) stallStart = performance.now();
     stalls++;
@@ -540,8 +652,7 @@ async function runLocalVideoTest() {
   const onTimeUpdate = () => {
     const currentTime = localVideo.currentTime;
 
-    // --- Freeze detection (video not moving) ---
-    if (Math.abs(currentTime - lastTime) < 0.05) { // YouTube-style threshold
+    if (Math.abs(currentTime - lastTime) < 0.05) {
       if (!freezeStart) {
         freezeStart = performance.now();
         freezeCount++;
@@ -552,7 +663,6 @@ async function runLocalVideoTest() {
     }
     lastTime = currentTime;
 
-    // --- Buffer monitoring ---
     const buf = localVideo.buffered;
     let bufferAhead = 0;
     for (let i = 0; i < buf.length; i++) {
@@ -561,14 +671,17 @@ async function runLocalVideoTest() {
         break;
       }
     }
+
     bufferAheadSamples.push(bufferAhead);
     minBufferAhead = Math.min(minBufferAhead, bufferAhead);
 
-    // --- Auto-stall if buffer too low ---
     if (bufferAhead < 0.2 && !stallStart) {
       stallStart = performance.now();
       stalls++;
     }
+
+    // 🔹 Real-time chart update
+    liveUpdateLocalChart(elapsedSeconds, bufferAhead, stalls);
   };
 
   const onError = () => {
@@ -576,35 +689,33 @@ async function runLocalVideoTest() {
     localResultsDiv && (localResultsDiv.innerHTML = '<div class="small">Local video error</div>');
   };
 
-  // --- Cleanup ---
   function cleanup() {
     localVideo.removeEventListener('waiting', onWaiting);
     localVideo.removeEventListener('playing', onPlaying);
     localVideo.removeEventListener('timeupdate', onTimeUpdate);
     localVideo.removeEventListener('error', onError);
 
-    try { localVideo.pause(); } catch (e) { }
+    try { localVideo.pause(); } catch (e) {}
     localVideo.style.display = 'none';
   }
 
-  // --- Attach listeners ---
   localVideo.addEventListener('waiting', onWaiting);
   localVideo.addEventListener('playing', onPlaying);
   localVideo.addEventListener('timeupdate', onTimeUpdate);
   localVideo.addEventListener('error', onError);
 
-  try { await localVideo.play(); } catch (e) { }
+  try { await localVideo.play(); } catch (e) {}
 
-  // --- Test timer ---
+  // Test Timer Loop
   for (let i = duration; i >= 1; i--) {
-    setTimerText(`${i}s`);
     await new Promise(r => setTimeout(r, 1000));
+    elapsedSeconds++; // 🔹 needed for chart timing
+    setTimerText(`${i}s`);
   }
 
-  // --- Final accounting ---
   if (stallStart) totalStall += performance.now() - stallStart;
   if (freezeStart) freezeDuration += performance.now() - freezeStart;
-  if (startup === null) startup = performance.now() - startReq; // fallback
+  if (startup === null) startup = performance.now() - startReq;
 
   cleanup();
 
@@ -627,6 +738,7 @@ async function runLocalVideoTest() {
 
   g_results.local = result;
   localResultsDiv && (localResultsDiv.innerHTML = renderLocalHTML(result));
+
   saveHistoryEntry({
     ts: Date.now(),
     voip: g_results.voip,
@@ -638,6 +750,7 @@ async function runLocalVideoTest() {
   setTimerText('0s');
   return result;
 }
+
 
 // ================================================
 //               YOUTUBE VIDEO TEST (FIXED)
@@ -782,15 +895,20 @@ async function runYouTubeTest() {
 
     ytPlayer.addEventListener?.("onStateChange", stateChangeHandler);
 
-    // ---- Continuous poll for freeze & buffer metrics ----
+    // ---- Continuous poll for freeze & buffer metrics (LIVE CHART UPDATE ADDED) ----
     const poll = setInterval(() => {
       try {
         const ct = ytPlayer.getCurrentTime();
         const durationTotal = ytPlayer.getDuration();
         const fraction = ytPlayer.getVideoLoadedFraction();
 
-        const bufferedAhead = Math.max(0, fraction * durationTotal - ct);
-        bufferSamples.push(bufferedAhead);
+        const bufferAhead = Math.max(0, fraction * durationTotal - ct);
+        bufferSamples.push(bufferAhead);
+
+        // ---------- 🔥 HERE: LIVE UI UPDATE ----------
+        const elapsedSec = Math.floor((performance.now() - startTime) / 1000);
+        liveUpdateYTChart(elapsedSec, bufferAhead, stalls);
+        // --------------------------------------------
 
         // Freeze detection
         const now = performance.now();
@@ -832,7 +950,6 @@ async function runYouTubeTest() {
         const maxBufferAhead =
           bufferSamples.length > 0 ? Math.max(...bufferSamples) : 0;
 
-        // ---- Correct bufferRatio ----
         const bufferRatio = Number(
           ((totalStall / (duration * 1000)) * 100).toFixed(2)
         );
@@ -853,7 +970,7 @@ async function runYouTubeTest() {
         g_results.youtube = res;
         ytResultsDiv.innerHTML = renderYtHTML(res);
 
-        stopYouTubePlaybackAndHide(); // FULL audio/video shutdown
+        stopYouTubePlaybackAndHide();
 
         saveHistoryEntry({
           ts: Date.now(),
@@ -868,6 +985,7 @@ async function runYouTubeTest() {
     }, 1000);
   });
 }
+
 
 // -------------------- NDT7 Speed Test --------------------
 async function runNdt7Test(timeoutSec = 30) {
