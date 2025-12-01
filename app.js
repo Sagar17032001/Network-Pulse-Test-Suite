@@ -1,5 +1,7 @@
 /* app.js — Full feature set (NDT7 for speed test, new YouTube logic preserved) */
 // -------------------- Helpers & DOM --------------------
+// Limit rendering quality for better mobile performance
+Chart.defaults.devicePixelRatio = Math.min(window.devicePixelRatio, 1.5);
 const runVoipBtn = document.getElementById('runVoipBtn');
 const runLocalBtn = document.getElementById('runLocalBtn');
 const runYtBtn = document.getElementById('runYtBtn');
