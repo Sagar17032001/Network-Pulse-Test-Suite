@@ -15,9 +15,9 @@
   <script src="https://www.youtube.com/iframe_api"></script>
 
   <!-- Favicon -->
-<link rel="icon" type="image/png" href="assets/image.png" />
-<!-- OR for .ico format -->
-<link rel="icon" type="image/x-icon" href="assets/image.png" />
+  <link rel="icon" type="image/png" href="assets/image.png" />
+  <!-- OR for .ico format -->
+  <link rel="icon" type="image/x-icon" href="assets/image.png" />
 
 
   <link rel="stylesheet" href="style.css" />
@@ -78,7 +78,8 @@
         <div class="card-body">
           <canvas id="latencyChart" height="140"></canvas>
           <div id="voipResults" class="results small">
-            Evaluates real-time call quality by measuring latency, jitter, and packet performance to calculate a MOS score that reflects voice clarity and smoothness.
+            Evaluates real-time call quality by measuring latency, jitter, and packet performance to calculate a MOS
+            score that reflects voice clarity and smoothness.
           </div>
         </div>
       </div>
@@ -89,7 +90,8 @@
           <video id="localVideo" src="assets/test-video.mp4" playsinline preload="auto" style="display:none"></video>
           <canvas id="localChart" height="140"></canvas>
           <div id="localResults" class="results small">
-            Tests local video playback behavior, analyzing buffering and freeze events to assess how reliably media plays on the network. 
+            Tests local video playback behavior, analyzing buffering and freeze events to assess how reliably media
+            plays on the network.
           </div>
         </div>
       </div>
@@ -102,7 +104,8 @@
           </div>
           <canvas id="ytChart" height="140"></canvas>
           <div id="ytResults" class="results small">
-            Monitors streaming performance by tracking resolution changes, buffering, and playback interruptions while adapting to network conditions.
+            Monitors streaming performance by tracking resolution changes, buffering, and playback interruptions while
+            adapting to network conditions.
           </div>
         </div>
       </div>
@@ -112,7 +115,8 @@
         <div class="card-body">
           <canvas id="speedChart" height="140"></canvas>
           <div id="speedResults" class="results small">
-            Measures actual upload and download throughput using standard MLab (NDT7) servers to determine overall network speed and responsiveness.
+            Measures actual upload and download throughput using standard MLab (NDT7) servers to determine overall
+            network speed and responsiveness.
           </div>
         </div>
       </div>
@@ -134,8 +138,11 @@
   <div id="emailModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal" role="document">
       <h4>Enter your email so we can save or send the test report (e.g. you@example.com):</h4>
-      <div class="small">This email will be attached to the test run in History. Please wait for 120 seconds for the
-        whole test to be run properly</div>
+      <div class="small">
+        This email will be attached to the test run in History. Please wait for <span id="totalDuration">0</span>
+        seconds for the whole test to complete.
+      </div>
+
       <div class="modal-row">
         <input id="emailInput" type="email" placeholder="you@example.com" />
       </div>
@@ -146,10 +153,12 @@
     </div>
   </div>
 
-  <!-- Loader Modal -->
-  <div id="loaderScreen">
-    <div class="loader"></div>
-    <div class="loader-text">Saving results...</div>
+  <div>
+    <!-- Loader Modal -->
+    <div id="loaderScreen">
+      <div class="loader"></div>
+      <div class="loader-text">Saving results...</div>
+    </div>
   </div>
 
 
