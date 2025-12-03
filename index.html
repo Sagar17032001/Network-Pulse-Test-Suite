@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -13,8 +14,15 @@
   <!-- YouTube iframe API (old logic uses this global callback) -->
   <script src="https://www.youtube.com/iframe_api"></script>
 
+  <!-- Favicon -->
+<link rel="icon" type="image/png" href="assets/image.png" />
+<!-- OR for .ico format -->
+<link rel="icon" type="image/x-icon" href="assets/image.png" />
+
+
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
   <div class="page-wrapper">
 
@@ -25,10 +33,10 @@
       </div>
       <p class="subtitle">Real-time QoE & performance insights.</p>
     </header>
-    
+
 
     <section class="controls-card">
-      
+
       <div class="left">
         <label>VoIP Duration (sec):
           <input id="voipDuration" type="number" min="5" max="300" value="30">
@@ -57,46 +65,54 @@
 
       <div class="right">
         <div class="timer-box">Timer: <span id="timer">0s</span></div>
-        <div class="status-box"><h3>Status: </h3><span id="status">Idle</span></div>
+        <div class="status-box">
+          <h3>Status: </h3><span id="status">Idle</span>
+        </div>
       </div>
     </section>
 
     <section class="results-grid">
 
       <div class="card" id="voipCard">
-        <h3>VoIP Test</h3>
+        <h3>📞 VoIP Test</h3>
         <div class="card-body">
           <canvas id="latencyChart" height="140"></canvas>
-          <div id="voipResults" class="results"></div>
+          <div id="voipResults" class="results small">
+            Evaluates real-time call quality by measuring latency, jitter, and packet performance to calculate a MOS score that reflects voice clarity and smoothness.
+          </div>
         </div>
       </div>
 
       <div class="card" id="localCard">
-        <h3>Local Video Test</h3>
+        <h3>🎬 Local Video Test</h3>
         <div class="card-body">
           <video id="localVideo" src="assets/test-video.mp4" playsinline preload="auto" style="display:none"></video>
           <canvas id="localChart" height="140"></canvas>
-          <div id="localResults" class="results"></div>
+          <div id="localResults" class="results small">
+            Tests local video playback behavior, analyzing buffering and freeze events to assess how reliably media plays on the network. 
+          </div>
         </div>
       </div>
 
       <div class="card" id="ytCard">
-        <h3>YouTube Test</h3>
+        <h3>▶️ YouTube Test</h3>
         <div class="card-body">
           <div id="youtubeContainer" style="display:none">
             <div id="youtubePlayer"></div>
           </div>
           <canvas id="ytChart" height="140"></canvas>
-          <div id="ytResults" class="results"></div>
+          <div id="ytResults" class="results small">
+            Monitors streaming performance by tracking resolution changes, buffering, and playback interruptions while adapting to network conditions.
+          </div>
         </div>
       </div>
 
       <div class="card" id="speedCard">
-        <h3>Speed Test</h3>
+        <h3>🚀 Speed Test</h3>
         <div class="card-body">
           <canvas id="speedChart" height="140"></canvas>
           <div id="speedResults" class="results small">
-            Speed test will auto-run using NDT7's MLab Server.
+            Measures actual upload and download throughput using standard MLab (NDT7) servers to determine overall network speed and responsiveness.
           </div>
         </div>
       </div>
@@ -118,7 +134,8 @@
   <div id="emailModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal" role="document">
       <h4>Enter your email so we can save or send the test report (e.g. you@example.com):</h4>
-      <div class="small">This email will be attached to the test run in History. Please wait for 120 seconds for the whole test to be run properly</div>
+      <div class="small">This email will be attached to the test run in History. Please wait for 120 seconds for the
+        whole test to be run properly</div>
       <div class="modal-row">
         <input id="emailInput" type="email" placeholder="you@example.com" />
       </div>
@@ -129,8 +146,16 @@
     </div>
   </div>
 
+  <!-- Loader Modal -->
+  <div id="loaderScreen">
+    <div class="loader"></div>
+    <div class="loader-text">Saving results...</div>
+  </div>
+
+
   <script src="app.js" defer></script>
   <script src="https://unpkg.com/ndt7/dist/ndt7.min.js"></script>
 
 </body>
+
 </html>
