@@ -1292,7 +1292,7 @@ async function runAll(email) {
     
       setStatus("Results saved!");
     } catch (e) {
-      setStatus("Completed All Test!");
+      setStatus("Completed All Tests!");
       console.error(e);
     }
     
