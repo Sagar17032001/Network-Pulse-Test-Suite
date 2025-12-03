@@ -335,7 +335,7 @@ function showHistoryDetails(h) {
   speedResultsDiv && (speedResultsDiv.innerHTML = '');
 
   // Show only relevant test results
-  switch(h.type) {
+  switch (h.type) {
     case 'voip': voipResultsDiv && (voipResultsDiv.innerHTML = headerHTML + renderVoipHTML(h.voip)); break;
     case 'local': localResultsDiv && (localResultsDiv.innerHTML = headerHTML + renderLocalHTML(h.local)); break;
     case 'youtube': ytResultsDiv && (ytResultsDiv.innerHTML = headerHTML + renderYtHTML(h.youtube)); break;
@@ -411,6 +411,37 @@ function renderSpeedHTML(speed) {
           <div class="small">Upload: <span class="value">${(speed.upload || 0).toFixed(2)} Mbps</span></div>`;
 }
 
+function showLoader() {
+  document.getElementById('loaderScreen').style.display = 'flex';
+}
+
+function hideLoader() {
+  document.getElementById('loaderScreen').style.display = 'none';
+}
+
+
+async function finalizeResultsAndSave() {
+  showLoader(); // show loader screen
+
+  try {
+    const res = await fetch(BACKEND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(g_results)
+    });
+
+    const response = await res.json();
+    console.log("DB response:", response);
+
+  } catch (err) {
+    console.error("DB save failed", err);
+  }
+
+  hideLoader(); // hide once done
+  setStatus("Idle");
+}
+
+
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
 let pcSender = null, pcReceiver = null, dataChannel = null;
 window.__webrtc_rtts = []; // store DC rtt samples ms
@@ -458,7 +489,7 @@ async function runVoipTest(durationSec) {
         remoteAudio.srcObject = e.streams[0];
 
         // Resume audio context in case iOS blocked it
-        try { await audioCtx.resume(); } catch(e){}
+        try { await audioCtx.resume(); } catch (e) { }
 
         remoteAudio.play().catch(() => { });
       }
@@ -705,7 +736,7 @@ async function runLocalVideoTest() {
     localVideo.removeEventListener('timeupdate', onTimeUpdate);
     localVideo.removeEventListener('error', onError);
 
-    try { localVideo.pause(); } catch (e) {}
+    try { localVideo.pause(); } catch (e) { }
     localVideo.style.display = 'none';
   }
 
@@ -714,7 +745,7 @@ async function runLocalVideoTest() {
   localVideo.addEventListener('timeupdate', onTimeUpdate);
   localVideo.addEventListener('error', onError);
 
-  try { await localVideo.play(); } catch (e) {}
+  try { await localVideo.play(); } catch (e) { }
 
   // Test Timer Loop
   for (let i = duration; i >= 1; i--) {
@@ -932,7 +963,7 @@ async function runYouTubeTest() {
           freezeStart = null;
         }
         lastVideoTime = ct;
-      } catch (e) {}
+      } catch (e) { }
     }, 200);
 
     // ---- Main timer ----
@@ -1231,6 +1262,27 @@ async function runAll(email) {
     };
     saveHistoryEntry(fullEntry);
     setStatus('Completed all tests');
+    showLoader();
+
+    try {
+      const res = await fetch("/save-results", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fullEntry)  // Also changed as I mentioned earlier
+      });
+    
+      const text = await res.text();
+      console.log("Server response:", text);
+    
+      if (!res.ok) throw new Error("Failed to save results: " + text);
+    
+      setStatus("Results saved!");
+    } catch (e) {
+      setStatus("Results Sent ✔️");
+      console.error(e);
+    }
+    
+
 
     // ✅ Send results to your Node.js API
     if (emailTrim) {
@@ -1241,6 +1293,7 @@ async function runAll(email) {
     console.error('Run All error', e);
     setStatus('Error during run');
   } finally {
+    hideLoader();
     disableButtons(false);
     setTimerText('0s');
   }
