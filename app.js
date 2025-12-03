@@ -36,6 +36,38 @@ const YOUTUBE_CONTAINER_ID = 'youtubeContainer';
 const YOUTUBE_PLAYER_ELEMENT_ID = 'youtubePlayer';
 
 
+const totalDurationSpan = document.getElementById('totalDuration');
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const voipDurationInput = document.getElementById('voipDuration');
+  const videoDurationInput = document.getElementById('videoDuration');
+  const ytDurationInput = document.getElementById('ytDuration');
+  const speedDurationInput = document.getElementById('speedDuration');
+  const totalDurationSpan = document.getElementById('totalDuration');
+  const emailModal = document.getElementById('emailModal');
+
+  window.showEmailModal = function(show = true) {
+    if (!emailModal) return;
+
+    if (show) {
+      // calculate total duration dynamically
+      const voip = parseInt(voipDurationInput.value) || 0;
+      const local = parseInt(videoDurationInput.value) || 0;
+      const yt = parseInt(ytDurationInput.value) || 0;
+      const speed = parseInt(speedDurationInput.value) || 0;
+
+      const totalDuration = voip + local + yt + speed;
+      totalDurationSpan.textContent = totalDuration;
+
+      emailModal.classList.add('show');
+      emailModal.setAttribute('aria-hidden', 'false');
+    } else {
+      emailModal.classList.remove('show');
+      emailModal.setAttribute('aria-hidden', 'true');
+    }
+  }
+});
 
 
 
@@ -97,7 +129,7 @@ function initYTChart() {
           data: [],
           borderColor: '#007bff',
           fill: false,
-          tension: 0.25
+          tension: 0.25,
         },
         {
           label: 'Stalls Count',
@@ -411,35 +443,17 @@ function renderSpeedHTML(speed) {
           <div class="small">Upload: <span class="value">${(speed.upload || 0).toFixed(2)} Mbps</span></div>`;
 }
 
-function showLoader() {
-  document.getElementById('loaderScreen').style.display = 'flex';
+function showLoader(text = "Sending Results to DB...") {
+  const loader = document.getElementById("loaderScreen");
+  loader.querySelector(".loader-text").textContent = text;
+  loader.style.display = "flex";  // show loader
 }
 
 function hideLoader() {
-  document.getElementById('loaderScreen').style.display = 'none';
+  const loader = document.getElementById("loaderScreen");
+  loader.style.display = "none";  // hide loader
 }
 
-
-async function finalizeResultsAndSave() {
-  showLoader(); // show loader screen
-
-  try {
-    const res = await fetch(BACKEND_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(g_results)
-    });
-
-    const response = await res.json();
-    console.log("DB response:", response);
-
-  } catch (err) {
-    console.error("DB save failed", err);
-  }
-
-  hideLoader(); // hide once done
-  setStatus("Idle");
-}
 
 
 // -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
@@ -1278,7 +1292,7 @@ async function runAll(email) {
     
       setStatus("Results saved!");
     } catch (e) {
-      setStatus("Results Sent ✔️");
+      setStatus("Completed All Test!");
       console.error(e);
     }
     
