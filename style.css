@@ -147,6 +147,48 @@ h1{margin:0;font-size:28px}
   border-radius: 8px;
 }
 
+#loaderScreen {
+  display: none !important; /* force hidden */
+  opacity: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(3px);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  font-family: Arial, sans-serif;
+  transition: opacity 0.3s ease;
+}
+
+
+.loader {
+  width: 45px;
+  height: 45px;
+  border: 5px solid #ccc;
+  border-top: 5px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+.loader-text {
+  font-size: 18px;
+  color: #333;
+  font-weight: 600;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+ 100% { transform: rotate(360deg); }
+}
+
+
+
 
 
 /* modal */
