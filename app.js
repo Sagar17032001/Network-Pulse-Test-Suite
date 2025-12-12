@@ -456,71 +456,152 @@ function hideLoader() {
 
 
 
-// -------------------- WebRTC VoIP Test (NO MIC PERMISSION NEEDED) --------------------
+// -------------------- WebRTC VoIP Test (TURN + DataChannel fixed) --------------------
 let pcSender = null, pcReceiver = null, dataChannel = null;
 window.__webrtc_rtts = []; // store DC rtt samples ms
 let pingInterval = null;
 
+// --- Xirsys ICE servers (from your provided JSON) ---
+// Xirsys is a cloud service that provides STUN and TURN servers for WebRTC applications.
+
+// When you do WebRTC (VoIP, video call, P2P data channel), devices must exchange media even behind NATs/firewalls.
+// To achieve this, every WebRTC app needs ICE servers:
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: ["stun:bn-turn2.xirsys.com"] },
+    {
+      username: "QUijarzyJrAuEwKQeJZur1wEBSaxGg2ai6_AMivWz8QG-0yw50-lT8b4K127NeBnAAAAAGk71fNTYWdhclNhbXJhdA==",
+      credential: "c979c5b0-d736-11f0-849c-0242ac140004",
+      urls: [
+        "turn:bn-turn2.xirsys.com:80?transport=udp",
+        "turn:bn-turn2.xirsys.com:3478?transport=udp",
+        "turn:bn-turn2.xirsys.com:80?transport=tcp",
+        "turn:bn-turn2.xirsys.com:3478?transport=tcp",
+        "turns:bn-turn2.xirsys.com:443?transport=tcp",
+        "turns:bn-turn2.xirsys.com:5349?transport=tcp"
+      ]
+    }
+  ],
+  // If you want to force relay-only (guarantees TURN) uncomment the next line:
+  // iceTransportPolicy: 'relay'
+};
+
+// Utility: install candidate filter to drop host candidates and forward others
+function installCandidateFilter(srcPc, forwardPc) {
+  srcPc.addEventListener('icecandidate', ev => {
+    if (!ev.candidate) return;
+    const cand = ev.candidate.candidate || '';
+    // Drop host candidates explicitly (local)
+    if (/\btyp host\b/i.test(cand) || /candidate:.* host /i.test(cand)) {
+      return;
+    }
+    // Forward the candidate to the other peer
+    forwardPc.addIceCandidate(ev.candidate).catch(() => { /* ignore */ });
+  });
+}
+
+// Utility: robust wait for data channel open or connection success
+function waitForDcOpenOrConnected(dc, pc, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const cleanup = () => {
+      done = true;
+      clearTimeout(tid);
+      if (pc && pc.removeEventListener) pc.removeEventListener('connectionstatechange', onConnState);
+      dc.onopen = null;
+      dc.onerror = null;
+    };
+    const onConnState = () => {
+      try {
+        const s = pc.connectionState || pc.iceConnectionState;
+        if (s === 'connected' || s === 'completed') {
+          if (!done) { cleanup(); resolve(); }
+        } else if (s === 'failed' || s === 'disconnected' || s === 'closed') {
+          if (!done) { cleanup(); reject(new Error('PeerConnection failed: ' + s)); }
+        }
+      } catch (e) { /* ignore */ }
+    };
+    dc.onopen = () => { if (!done) { cleanup(); resolve(); } };
+    dc.onerror = (e) => { if (!done) { cleanup(); reject(new Error('DataChannel error')); } };
+    if (pc && pc.addEventListener) pc.addEventListener('connectionstatechange', onConnState);
+    const tid = setTimeout(() => {
+      if (!done) { cleanup(); reject(new Error('DataChannel open timeout')); }
+    }, timeoutMs);
+  });
+}
+
+// Utility: extract outbound RTT from getStats map (candidate-pair/currentRoundTripTime or outbound-rtp.roundTripTime)
+function extractOutboundRttMs(stats) {
+  const rtts = [];
+  stats.forEach(rep => {
+    try {
+      if (rep.type === 'outbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
+        if (typeof rep.roundTripTime === 'number' && rep.roundTripTime > 0) rtts.push(rep.roundTripTime * 1000);
+      }
+      if (rep.type === 'candidate-pair' && rep.state === 'succeeded' && typeof rep.currentRoundTripTime === 'number' && rep.currentRoundTripTime > 0) {
+        rtts.push(rep.currentRoundTripTime * 1000);
+      }
+      // fallback for vendor-specific names
+      if ((rep.type === 'googCandidatePair' || rep.type === 'selectedcandidatepair') && typeof rep.currentRoundTripTime === 'number' && rep.currentRoundTripTime > 0) {
+        rtts.push(rep.currentRoundTripTime * 1000);
+      }
+    } catch (e) { /* ignore */ }
+  });
+  if (rtts.length === 0) return null;
+  return rtts.reduce((a, b) => a + b, 0) / rtts.length;
+}
+
 async function runVoipTest(durationSec) {
-  setStatus('VoIP test running');
-  setTimerText(`${durationSec}s`);
+  setStatus && setStatus('VoIP test running');
+  setTimerText && setTimerText(`${durationSec}s`);
   voipResultsDiv && (voipResultsDiv.innerHTML = '<div class="small">Preparing...</div>');
   window.__webrtc_rtts = [];
 
   try {
-    // --------------------------------------------------------
-    // 1. SYNTHETIC AUDIO TRACK (replaces microphone entirely)
-    // --------------------------------------------------------
+    // 1. create synthetic audio track
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    // Resume audio context on iOS/Chrome
     if (audioCtx.state === 'suspended') {
-      await audioCtx.resume();
+      try { await audioCtx.resume(); } catch (e) { /* ignore */ }
     }
-
     const oscillator = audioCtx.createOscillator();
-    oscillator.frequency.value = 0;  // silent
-
+    oscillator.frequency.value = 0;
     const dest = audioCtx.createMediaStreamDestination();
     oscillator.connect(dest);
     oscillator.start();
+    const stream = dest.stream;
 
-    const stream = dest.stream;   // acts exactly like mic stream
+    // 2. setup peerconnections with ICE config
+    pcSender = new RTCPeerConnection(ICE_CONFIG);
+    pcReceiver = new RTCPeerConnection(ICE_CONFIG);
 
-    // --------------------------------------------------------
-    // 2. WebRTC Sender/Receiver setup
-    // --------------------------------------------------------
-    pcSender = new RTCPeerConnection();
-    pcReceiver = new RTCPeerConnection();
+    // filter host candidates and forward others
+    installCandidateFilter(pcSender, pcReceiver);
+    installCandidateFilter(pcReceiver, pcSender);
 
-    stream.getTracks().forEach(t => pcSender.addTrack(t, stream));
-
-    pcSender.onicecandidate = e => e.candidate && pcReceiver.addIceCandidate(e.candidate).catch(() => { });
-    pcReceiver.onicecandidate = e => e.candidate && pcSender.addIceCandidate(e.candidate).catch(() => { });
-
-    pcReceiver.ontrack = async e => {
-      if (remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
+    // attach inbound track handling
+    pcReceiver.ontrack = async (e) => {
+      if (typeof remoteAudio !== 'undefined' && remoteAudio && remoteAudio.srcObject !== e.streams[0]) {
         remoteAudio.srcObject = e.streams[0];
-
-        // Resume audio context in case iOS blocked it
-        try { await audioCtx.resume(); } catch (e) { }
-
-        remoteAudio.play().catch(() => { });
+        try { await audioCtx.resume(); } catch (e) { /* ignore */ }
+        remoteAudio.play().catch(() => { /* ignore autoplay */ });
       }
     };
 
-    // --------------------------------------------------------
-    // 3. DataChannel setup (ping/pong RTT)
-    // --------------------------------------------------------
-    dataChannel = pcSender.createDataChannel('ping');
+    // add audio track(s)
+    stream.getTracks().forEach(t => pcSender.addTrack(t, stream));
+
+    // 3. create datachannel BEFORE offer (prevents race/timeouts)
+    dataChannel = pcSender.createDataChannel('ping', { ordered: true });
     pcReceiver.ondatachannel = ev => {
       const ch = ev.channel;
-      ch.onmessage = m => { try { ch.send(m.data); } catch (e) { } };
+      ch.onmessage = m => { try { ch.send(m.data); } catch (e) { /* ignore */ } };
     };
 
-    // --------------------------------------------------------
+    // small logging handlers
+    pcSender.oniceconnectionstatechange = () => { console.log('pcSender ice state:', pcSender.iceConnectionState, 'connState:', pcSender.connectionState); };
+    pcReceiver.oniceconnectionstatechange = () => { console.log('pcReceiver ice state:', pcReceiver.iceConnectionState, 'connState:', pcReceiver.connectionState); };
+
     // 4. SDP negotiation
-    // --------------------------------------------------------
     const offer = await pcSender.createOffer();
     await pcSender.setLocalDescription(offer);
     await pcReceiver.setRemoteDescription(offer);
@@ -529,9 +610,10 @@ async function runVoipTest(durationSec) {
     await pcReceiver.setLocalDescription(answer);
     await pcSender.setRemoteDescription(answer);
 
-    // --------------------------------------------------------
-    // 5. RTT sampling
-    // --------------------------------------------------------
+    // 5. wait for datachannel open or connection (robust)
+    await waitForDcOpenOrConnected(dataChannel, pcSender, 20000);
+
+    // 6. RTT sampling (DC) and ping sender
     const rtts = [];
     dataChannel.onmessage = ev => {
       try {
@@ -540,26 +622,24 @@ async function runVoipTest(durationSec) {
           const rtt = performance.now() - pkt.sentTs;
           rtts.push(rtt);
           window.__webrtc_rtts.push(rtt);
-          updateCharts(rtt, 0);
+          try { updateCharts && updateCharts(rtt, 0); } catch (e) { /* ignore */ }
         }
-      } catch (e) { }
+      } catch (e) { /* ignore */ }
     };
 
     pingInterval = setInterval(() => {
       if (dataChannel && dataChannel.readyState === 'open') {
         const pkt = { sentTs: performance.now(), jitter: 0 };
-        try { dataChannel.send(JSON.stringify(pkt)); } catch (e) { }
+        try { dataChannel.send(JSON.stringify(pkt)); } catch (e) { /* ignore */ }
       }
     }, 1000);
 
-    // --------------------------------------------------------
-    // 6. RTP Stats collection
-    // --------------------------------------------------------
+    // 7. RTP Stats collection
     const inboundHistory = [];
     const outboundHistory = [];
 
     for (let i = durationSec; i >= 1; i--) {
-      setTimerText(`${i}s`);
+      setTimerText && setTimerText(`${i}s`);
 
       try {
         const stats = await pcReceiver.getStats();
@@ -572,16 +652,13 @@ async function runVoipTest(durationSec) {
             });
           }
         });
-      } catch (e) { }
+      } catch (e) { /* ignore */ }
 
       try {
         const stats2 = await pcSender.getStats();
-        stats2.forEach(r => {
-          if (r.type === 'outbound-rtp' && (r.kind === 'audio' || r.mediaType === 'audio')) {
-            outboundHistory.push({ rtt: r.roundTripTime || 0 });
-          }
-        });
-      } catch (e) { }
+        // Keep whole stats map to extract candidate-pair RTT or outbound-rtp RTT later
+        outboundHistory.push(stats2);
+      } catch (e) { /* ignore */ }
 
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -589,9 +666,7 @@ async function runVoipTest(durationSec) {
     clearInterval(pingInterval);
     await new Promise(r => setTimeout(r, 300));
 
-    // --------------------------------------------------------
-    // 7. Aggregation
-    // --------------------------------------------------------
+    // 8. Aggregation & RTT selection
     const lastInbound = inboundHistory.length ? inboundHistory[inboundHistory.length - 1] : null;
     const packetsReceived = lastInbound ? lastInbound.packetsReceived : 0;
     const packetsLost = lastInbound ? lastInbound.packetsLost : 0;
@@ -602,10 +677,18 @@ async function runVoipTest(durationSec) {
     const dcRtts = window.__webrtc_rtts.slice();
     const avgDcRtt = dcRtts.length ? dcRtts.reduce((a, b) => a + b, 0) / dcRtts.length : 0;
 
-    const outboundRttMsArr = outboundHistory.map(s => (s.rtt || 0) * 1000);
+    // Parse outboundHistory stats maps to extract RTTs
+    const outboundRttMsArr = [];
+    outboundHistory.forEach(statsMap => {
+      try {
+        const v = extractOutboundRttMs(statsMap);
+        if (v !== null && !Number.isNaN(v) && v > 0) outboundRttMsArr.push(v);
+      } catch (e) { /* ignore */ }
+    });
     const avgOutboundRttMs = outboundRttMsArr.length ? outboundRttMsArr.reduce((a, b) => a + b, 0) / outboundRttMsArr.length : 0;
 
-    const latencyMs = avgDcRtt || avgOutboundRttMs;
+    // Prefer network-level RTT (outbound rtp / candidate-pair) over DC
+    const latencyMs = (avgOutboundRttMs > 0) ? avgOutboundRttMs : avgDcRtt;
 
     const totalPackets = packetsReceived + packetsLost;
     const lossPercent = totalPackets ? (packetsLost / totalPackets) * 100 : 0;
@@ -616,44 +699,47 @@ async function runVoipTest(durationSec) {
 
     const voip = {
       ts: Date.now(),
-      latencyMs,
-      avgJitterMs,
+      latencyMs: Math.round(latencyMs * 10) / 10,
+      avgJitterMs: Math.round(avgJitterMs * 10) / 10,
       packetsReceived,
       packetsLost,
-      lossPercent,
-      MOS,
+      lossPercent: Math.round(lossPercent * 100) / 100,
+      MOS: Math.round(MOS * 100) / 100,
       dcSamples: dcRtts.length
     };
 
-    g_results.voip = voip;
-    voipResultsDiv && (voipResultsDiv.innerHTML = renderVoipHTML(voip));
+    // expose results
+    if (typeof g_results !== 'undefined') g_results.voip = voip;
+    voipResultsDiv && (voipResultsDiv.innerHTML = renderVoipHTML ? renderVoipHTML(voip) : JSON.stringify(voip, null, 2));
 
-    saveHistoryEntry({
+    saveHistoryEntry && saveHistoryEntry({
       ts: Date.now(),
       voip,
-      local: g_results.local,
-      youtube: g_results.youtube
+      local: (typeof g_results !== 'undefined' ? g_results.local : undefined),
+      youtube: (typeof g_results !== 'undefined' ? g_results.youtube : undefined)
     });
 
-    // --------------------------------------------------------
-    // 8. Cleanup
-    // --------------------------------------------------------
-    try { pcSender.close(); pcReceiver.close(); } catch (e) { }
-    try { oscillator.stop(); audioCtx.close(); } catch (e) { }
+    // 9. cleanup
+    try { pcSender.close(); pcReceiver.close(); } catch (e) { /* ignore */ }
+    try { oscillator.stop(); audioCtx.close(); } catch (e) { /* ignore */ }
     pcSender = pcReceiver = dataChannel = null;
     window.__webrtc_rtts = [];
-    setStatus('Idle');
-    setTimerText('0s');
+    setStatus && setStatus('Idle');
+    setTimerText && setTimerText('0s');
 
     return voip;
 
   } catch (err) {
+    clearInterval(pingInterval);
+    try { pcSender && pcSender.close(); pcReceiver && pcReceiver.close(); } catch (e) { /* ignore */ }
+    try { window.__webrtc_rtts = []; } catch (e) { /* ignore */ }
     voipResultsDiv && (voipResultsDiv.innerHTML = `<div class="small">VoIP error: ${err?.message || err}</div>`);
-    setStatus('Idle');
-    setTimerText('0s');
+    setStatus && setStatus('Idle');
+    setTimerText && setTimerText('0s');
     return null;
   }
 }
+
 
 // -------------------- Local Video Test (Optimized YouTube-style) --------------------
 async function runLocalVideoTest() {
