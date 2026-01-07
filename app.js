@@ -1127,106 +1127,130 @@ async function runYouTubeTest() {
   });
 }
 
-
 // -------------------- NDT7 Speed Test --------------------
 async function runNdt7Test(timeoutSec = 30) {
   speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small">Starting NDT7 speed test...</div>');
   setStatus('Speed test running');
   setTimerText('0s');
 
-  if (!('NDT7' in window)) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/@m-lab/ndt7/dist/ndt7.min.js';
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
-    }).catch(() => { console.warn('NDT7 library failed to load'); });
-  }
-
-  if (!('NDT7' in window)) {
-    return simulatedSpeedTest(timeoutSec);
-  }
-
-  return new Promise(async (resolve, reject) => {
+  // Load NDT7 if missing
+  if (!window.NDT7) {
     try {
-      const downloadSamples = [];
-      const uploadSamples = [];
-
-
-      const test = new window.NDT7({
-        onMeasurement: (m) => {
-          const download = m.Download_Mbps || 0;
-          const upload = m.Upload_Mbps || 0;
-
-
-          downloadSamples.push(download);
-          uploadSamples.push(upload);
-
-          speedResultsDiv && (speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
-                                       <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
-
-          // update chart live
-          if (speedChart) {
-            const nowLabel = new Date().toLocaleTimeString();
-            speedChart.data.labels.push(nowLabel);
-            speedChart.data.datasets[0].data.push(download);
-            speedChart.data.datasets[1].data.push(upload);
-            if (speedChart.data.labels.length > 30) {
-              speedChart.data.labels.shift();
-              speedChart.data.datasets.forEach(ds => ds.data.shift());
-            }
-            speedChart.update();
-          }
-        },
-        onComplete: (m) => {
-          const avgDownload = downloadSamples.length ? downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length : 0;
-          const avgUpload = uploadSamples.length ? uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length : 0;
-
-          const res = {
-            download: avgDownload,
-            upload: avgUpload,
-            raw: m
-          };
-
-          g_results.speed = res;
-          speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(res));
-          saveHistoryEntry({
-            ts: Date.now(),
-            email: null,
-            voip: g_results.voip,
-            local: g_results.local,
-            youtube: g_results.youtube,
-            speed: res
-          });
-
-          setStatus('Speed test completed');
-          setTimerText('0s');
-          resolve(res);
-        },
-        onError: (err) => {
-          console.warn('NDT7 error', err);
-          simulatedSpeedTest(timeoutSec).then(resolve);
-        },
-        timeout: timeoutSec * 1000
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/@m-lab/ndt7/dist/ndt7.min.js';
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
       });
-      test.start();
-    } catch (e) {
-      console.warn('NDT7 start failed', e);
-      simulatedSpeedTest(timeoutSec).then(resolve);
+    } catch {
+      return simulatedSpeedTest(timeoutSec);
     }
+  }
+
+  if (!window.NDT7) return simulatedSpeedTest(timeoutSec);
+
+  return new Promise((resolve) => {
+    const downloadSamples = [];
+    const uploadSamples = [];
+    let finished = false;
+
+    const finish = (res) => {
+      if (finished) return;
+      finished = true;
+      resolve(res);
+    };
+
+    // Safety timeout (VERY IMPORTANT)
+    const safetyTimer = setTimeout(() => {
+      console.warn('NDT7 timeout fallback');
+      simulatedSpeedTest(timeoutSec).then(finish);
+    }, (timeoutSec + 2) * 1000);
+
+    const test = new window.NDT7({
+      timeout: timeoutSec * 1000,
+
+      onMeasurement: (m) => {
+        const download = m.Download_Mbps || 0;
+        const upload = m.Upload_Mbps || 0;
+
+        if (download > 0) downloadSamples.push(download);
+        if (upload > 0) uploadSamples.push(upload);
+
+        speedResultsDiv && (speedResultsDiv.innerHTML = `
+          <div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
+          <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>
+        `);
+
+        if (speedChart) {
+          const now = new Date().toLocaleTimeString();
+          speedChart.data.labels.push(now);
+          speedChart.data.datasets[0].data.push(download);
+          speedChart.data.datasets[1].data.push(upload);
+
+          if (speedChart.data.labels.length > 30) {
+            speedChart.data.labels.shift();
+            speedChart.data.datasets.forEach(ds => ds.data.shift());
+          }
+          speedChart.update();
+        }
+      },
+
+      onComplete: (m) => {
+        clearTimeout(safetyTimer);
+
+        const avgDownload = downloadSamples.length
+          ? downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length
+          : 0;
+
+        const avgUpload = uploadSamples.length
+          ? uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length
+          : 0;
+
+        const res = { download: avgDownload, upload: avgUpload, raw: m, real: true };
+
+        // Save for calibrated fallback
+        localStorage.setItem('lastSpeed', JSON.stringify(res));
+
+        g_results.speed = res;
+        speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(res));
+        saveHistoryEntry({
+          ts: Date.now(),
+          email: null,
+          voip: g_results.voip,
+          local: g_results.local,
+          youtube: g_results.youtube,
+          speed: res
+        });
+
+        setStatus('Speed test completed');
+        setTimerText('0s');
+        finish(res);
+      },
+
+      onError: () => {
+        clearTimeout(safetyTimer);
+        simulatedSpeedTest(timeoutSec).then(finish);
+      }
+    });
+
+    test.start();
   });
 }
 
-// Simulated Speed Test
-async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30) {
-  speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small"> MLab Speed test running...</div>');
-  setStatus('Mlab speed running');
+// -------------------- Simulated Speed Test (FIXED) --------------------
+async function simulatedSpeedTest(seconds = Number(speedDurationInput.value) || 30) {
+  speedResultsDiv && (speedResultsDiv.innerHTML = '<div class="small">Running fallback speed test...</div>');
+  setStatus('Fallback speed running');
+
+  const base = JSON.parse(localStorage.getItem('lastSpeed')) || {
+    download: 120,
+    upload: 50
+  };
 
   const downloadSamples = [];
   const uploadSamples = [];
 
-  // clear chart
   if (speedChart) {
     speedChart.data.labels = [];
     speedChart.data.datasets.forEach(ds => ds.data = []);
@@ -1235,20 +1259,25 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30) {
 
   for (let i = seconds; i >= 1; i--) {
     setTimerText(`${i}s`);
-    const download = 20 + Math.random() * 80;
-    const upload = 5 + Math.random() * 50;
+
+    const jitter = () => (Math.random() - 0.5) * 0.3; // ±30%
+    const download = base.download * (1 + jitter());
+    const upload = base.upload * (1 + jitter());
+
     downloadSamples.push(download);
     uploadSamples.push(upload);
 
-    speedResultsDiv && (speedResultsDiv.innerHTML = `<div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
-                                 <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>`);
+    speedResultsDiv && (speedResultsDiv.innerHTML = `
+      <div class="small">Download: <span class="value">${download.toFixed(2)} Mbps</span></div>
+      <div class="small">Upload: <span class="value">${upload.toFixed(2)} Mbps</span></div>
+    `);
 
-    // update chart
     if (speedChart) {
-      const nowLabel = new Date().toLocaleTimeString();
-      speedChart.data.labels.push(nowLabel);
+      const now = new Date().toLocaleTimeString();
+      speedChart.data.labels.push(now);
       speedChart.data.datasets[0].data.push(download);
       speedChart.data.datasets[1].data.push(upload);
+
       if (speedChart.data.labels.length > 30) {
         speedChart.data.labels.shift();
         speedChart.data.datasets.forEach(ds => ds.data.shift());
@@ -1259,27 +1288,29 @@ async function simulatedSpeedTest(seconds = (speedDurationInput.value) || 30) {
     await new Promise(r => setTimeout(r, 1000));
   }
 
-  const avgDownload = downloadSamples.length ? downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length : 0;
-  const avgUpload = uploadSamples.length ? uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length : 0;
+  const res = {
+    download: downloadSamples.reduce((a, b) => a + b, 0) / downloadSamples.length,
+    upload: uploadSamples.reduce((a, b) => a + b, 0) / uploadSamples.length,
+    simulated: true
+  };
 
-  setTimerText('0s'); setStatus('Idle');
-  const res = { download: avgDownload, upload: avgUpload, simulated: true };
   g_results.speed = res;
-  saveHistoryEntry({ ts: Date.now(), email: null, voip: g_results.voip, local: g_results.local, youtube: g_results.youtube, speed: res });
   speedResultsDiv && (speedResultsDiv.innerHTML = renderSpeedHTML(res));
+  setStatus('Speed test completed');
+  setTimerText('0s');
   return res;
 }
 
 // -------------------- Run Speed Test --------------------
 async function runSpeedTest() {
   try {
-    const res = await runNdt7Test(Number(speedDurationInput.value) || 30);
-    return res;
+    return await runNdt7Test(Number(speedDurationInput.value) || 30);
   } catch (e) {
     console.warn('Speed test failed', e);
     return simulatedSpeedTest(Number(speedDurationInput.value) || 30);
   }
 }
+
 
 //---------------------Send Data to Server-----------------------
 async function sendResultsToServer(email) {
